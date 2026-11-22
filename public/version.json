@@ -1,0 +1,12 @@
+{
+  "version": "189",
+  "buildDate": "2026-08-26",
+  "geojsonVersion": "114",
+  "features": 1740,
+  "planningTalhoes": 1384,
+  "planningFundos": 1117,
+  "experimentosTalhoes": 468,
+  "experimentosTipos": 40,
+  "experimentosAreaHa": 8131.97,
+  "changelog": "Seleção consistente: URL atualizada, painel antigo fechado e câmera sem espera por tiles."
+}

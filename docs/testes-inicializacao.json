@@ -1,0 +1,76 @@
+{
+  "checks": [
+    {
+      "name": "Primeira abertura: interface e canvas do mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 11778
+      }
+    },
+    {
+      "name": "Primeira instalação prepara shell e dados para offline",
+      "ok": true,
+      "detail": [
+        {
+          "name": "mapas-branco-peres-static",
+          "count": 35
+        },
+        {
+          "name": "mapas-branco-peres-data",
+          "count": 2
+        },
+        {
+          "name": "mapbox-tiles",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "Migração de manutenção preserva shell, fila e dados locais",
+      "ok": true,
+      "detail": {
+        "marker": "nao-apagar",
+        "pending": "[]",
+        "deleted": "[]",
+        "index": true
+      }
+    },
+    {
+      "name": "Reabertura sem rede mostra o aplicativo e o mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 1242
+      }
+    },
+    {
+      "name": "Ferramenta lazy carrega também sem rede",
+      "ok": true
+    },
+    {
+      "name": "Menu lateral lazy abre sem rede",
+      "ok": true
+    },
+    {
+      "name": "Falha dos dados não bloqueia a interface",
+      "ok": true
+    },
+    {
+      "name": "Botão Tentar novamente dispara busca e recupera os dados",
+      "ok": true
+    },
+    {
+      "name": "Rede lenta sem shell não retorna falso offline",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 4717
+      }
+    },
+    {
+      "name": "Nenhuma exceção JavaScript não tratada",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "pageErrors": [],
+  "note": "Chromium headless local; Mapbox simulado e Supabase bloqueado. Tempos de laboratório, não do celular real."
+}

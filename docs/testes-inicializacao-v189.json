@@ -1,0 +1,263 @@
+{
+  "checks": [
+    {
+      "name": "Abertura original: fundo verde, logo centralizado e animação",
+      "ok": true,
+      "detail": {
+        "background": "linear-gradient(135deg, rgb(26, 71, 42) 0%, rgb(45, 106, 79) 50%, rgb(26, 71, 42) 100%)",
+        "logo": "url(\"http://127.0.0.1:4173/header-startup.webp\")",
+        "animation": "rotateClockwise",
+        "centerX": 194.984375,
+        "centerY": 346,
+        "viewport": 390
+      }
+    },
+    {
+      "name": "Primeira abertura: interface e canvas do mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 15376
+      }
+    },
+    {
+      "name": "Digitar fundo 25 apenas filtra, sem mover o mapa",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "Número com zero à esquerda apenas filtra, sem voo",
+      "ok": true
+    },
+    {
+      "name": "Número inexistente não move o mapa",
+      "ok": true
+    },
+    {
+      "name": "Enter sem setas confirma resultado e voa até o talhão",
+      "ok": true,
+      "detail": [
+        {
+          "method": "fitBounds",
+          "args": [
+            [
+              [
+                -51.03509,
+                -21.49529
+              ],
+              [
+                -51.02638,
+                -21.48407
+              ]
+            ],
+            {
+              "padding": {
+                "top": 96,
+                "right": 48,
+                "bottom": 64,
+                "left": 48
+              },
+              "maxZoom": 15,
+              "duration": 2000
+            }
+          ]
+        },
+        {
+          "method": "flyTo",
+          "args": [
+            {
+              "center": {
+                "lng": -51.030734999999964,
+                "lat": -21.489239045590637
+              },
+              "zoom": 14.534637007006054,
+              "bearing": 0,
+              "pitch": 0,
+              "maxZoom": 15,
+              "duration": 2000
+            },
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Toque em outro talhão provoca novo voo",
+      "ok": true,
+      "detail": [
+        {
+          "method": "fitBounds",
+          "args": [
+            [
+              [
+                -51.02999,
+                -21.4914
+              ],
+              [
+                -51.02978,
+                -21.49117
+              ]
+            ],
+            {
+              "padding": {
+                "top": 96,
+                "right": 48,
+                "bottom": 64,
+                "left": 48
+              },
+              "maxZoom": 15,
+              "duration": 2000
+            }
+          ]
+        },
+        {
+          "method": "flyTo",
+          "args": [
+            {
+              "center": {
+                "lng": -51.02988500000001,
+                "lat": -21.490965547037618
+              },
+              "zoom": 15,
+              "bearing": 0,
+              "pitch": 0,
+              "maxZoom": 15,
+              "duration": 2000
+            },
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "name": "URL acompanha fundo e talhão selecionados",
+      "ok": true
+    },
+    {
+      "name": "Clique em polígono abre detalhes sem reutilizar voo antigo",
+      "ok": true
+    },
+    {
+      "name": "Área não duplica unidade ha",
+      "ok": true
+    },
+    {
+      "name": "Abrir busca fecha painel que bloqueava toque nos resultados",
+      "ok": true
+    },
+    {
+      "name": "Nova seleção fecha detalhes anteriores e atualiza URL",
+      "ok": true
+    },
+    {
+      "name": "Seleção executa câmera mesmo com estilo pendente",
+      "ok": true
+    },
+    {
+      "name": "Enquadramento considera limites das partes do talhão",
+      "ok": true,
+      "detail": [
+        [
+          [
+            -51.03509,
+            -21.49529
+          ],
+          [
+            -51.02638,
+            -21.48407
+          ]
+        ],
+        {
+          "padding": {
+            "top": 96,
+            "right": 48,
+            "bottom": 64,
+            "left": 48
+          },
+          "maxZoom": 15,
+          "duration": 2000
+        }
+      ]
+    },
+    {
+      "name": "Seleções rápidas preservam o último fundo e talhão",
+      "ok": true,
+      "detail": [
+        {
+          "FAZENDA": 1,
+          "ZONA": 1,
+          "TALHAO": 1,
+          "AREA_TOTAL": 12.43
+        }
+      ]
+    },
+    {
+      "name": "Primeira instalação prepara shell e dados para offline",
+      "ok": true,
+      "detail": [
+        {
+          "name": "mapas-branco-peres-static",
+          "count": 40
+        },
+        {
+          "name": "mapas-branco-peres-data",
+          "count": 2
+        },
+        {
+          "name": "mapbox-tiles",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "Migração de manutenção preserva shell, fila e dados locais",
+      "ok": true,
+      "detail": {
+        "marker": "nao-apagar",
+        "pending": "[]",
+        "deleted": "[]",
+        "index": true
+      }
+    },
+    {
+      "name": "Recarregar mantém a seleção mais recente na URL",
+      "ok": true
+    },
+    {
+      "name": "Reabertura sem rede mostra o aplicativo e o mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 1188
+      }
+    },
+    {
+      "name": "Ferramenta lazy carrega também sem rede",
+      "ok": true
+    },
+    {
+      "name": "Menu lateral lazy abre sem rede",
+      "ok": true
+    },
+    {
+      "name": "Falha dos dados não bloqueia a interface",
+      "ok": true
+    },
+    {
+      "name": "Botão Tentar novamente dispara busca e recupera os dados",
+      "ok": true
+    },
+    {
+      "name": "Rede lenta sem shell não retorna falso offline",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 4961
+      }
+    },
+    {
+      "name": "Nenhuma exceção JavaScript não tratada",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "pageErrors": [],
+  "note": "Chromium headless local; Mapbox simulado e Supabase bloqueado. Tempos de laboratório, não do celular real."
+}

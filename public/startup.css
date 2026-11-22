@@ -1,0 +1,186 @@
+
+        @keyframes rotateClockwise {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes rotateCounterClockwise {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(-360deg); }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes pulseGlow {
+          0%, 100% { opacity: 0.5; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.05); }
+        }
+        @keyframes logoPulse {
+          0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(76,175,80,0.8), 0 0 80px rgba(76,175,80,0.4); }
+          50% { transform: scale(1.05); box-shadow: 0 0 50px rgb(76,175,80), 0 0 100px rgba(76,175,80,0.6); }
+        }
+        @keyframes textFade {
+          0%, 100% { opacity: 0.8; }
+          50% { opacity: 1; }
+        }
+        @keyframes subTextFade {
+          0%, 100% { opacity: 0.6; }
+          50% { opacity: 0.9; }
+        }
+        @keyframes dotBounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-6px); opacity: 1; }
+        }
+        @keyframes progressAnim {
+          0% { width: 0%; }
+          50% { width: 70%; }
+          100% { width: 100%; }
+        }
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        .bp-loading-screen {
+          position: fixed;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 50%, #1a472a 100%);
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          z-index: 9999;
+          overflow: hidden;
+        }
+        .bp-loading-screen::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(circle at 50% 50%, rgba(76, 175, 80, 0.1) 0%, transparent 70%);
+          animation: pulseGlow 3s ease-in-out infinite;
+        }
+        .bp-loader-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 40px;
+          position: relative;
+          z-index: 10;
+        }
+        .bp-logo-container {
+          position: relative;
+          width: 140px;
+          height: 140px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .bp-glow-ring-outer {
+          position: absolute;
+          width: 180px; height: 180px;
+          border: 3px solid;
+          border-color: rgba(76,175,80,0.8) rgba(139,195,74,0.6) transparent transparent;
+          border-radius: 50%;
+          animation: rotateClockwise 3s linear infinite;
+          box-shadow: 0 0 30px rgba(76,175,80,0.6), inset 0 0 30px rgba(76,175,80,0.2);
+        }
+        .bp-glow-ring-middle {
+          position: absolute;
+          width: 140px; height: 140px;
+          border: 2px solid;
+          border-color: rgba(139,195,74,0.7) transparent transparent rgba(76,175,80,0.5);
+          border-radius: 50%;
+          animation: rotateCounterClockwise 4s linear infinite;
+          box-shadow: 0 0 20px rgba(139,195,74,0.5), inset 0 0 20px rgba(76,175,80,0.15);
+        }
+        .bp-glow-ring-inner {
+          position: absolute;
+          width: 100px; height: 100px;
+          border: 2px solid;
+          border-color: transparent rgba(139,195,74,0.4) rgba(76,175,80,0.6) transparent;
+          border-radius: 50%;
+          animation: rotateClockwise 5s linear infinite;
+          box-shadow: 0 0 15px rgba(76,175,80,0.4), inset 0 0 15px rgba(139,195,74,0.1);
+        }
+        .bp-logo-image {
+          position: relative;
+          width: 120px;
+          height: 120px;
+          background: url('/header-startup.webp') center center / contain no-repeat rgba(255,255,255,0.05);
+          border-radius: 50%;
+          box-shadow: 0 0 40px rgba(76,175,80,0.8), 0 0 80px rgba(76,175,80,0.4);
+          animation: logoPulse 2s ease-in-out infinite;
+          z-index: 5;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .bp-spinner {
+          position: absolute;
+          width: 60px; height: 60px;
+          border: 4px solid;
+          border-color: rgba(76,175,80,0.8) rgba(255,255,255,0.1) rgba(255,255,255,0.1);
+          border-radius: 50%;
+          animation: spin 2s linear infinite;
+          opacity: 0.3;
+        }
+        .bp-loader-text {
+          color: white;
+          font-size: 24px;
+          font-weight: 600;
+          text-align: center;
+          letter-spacing: 1px;
+          text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+          animation: textFade 2s ease-in-out infinite;
+        }
+        .bp-loader-subtext {
+          color: rgba(255,255,255,0.9);
+          font-size: 14px;
+          margin-top: 5px;
+          letter-spacing: 0.5px;
+          animation: subTextFade 3s ease-in-out infinite;
+          text-align: center;
+        }
+        .bp-dots {
+          display: inline-flex;
+          gap: 3px;
+          margin-left: 2px;
+          vertical-align: middle;
+        }
+        .bp-dot {
+          width: 5px; height: 5px;
+          background: white;
+          border-radius: 50%;
+          animation: dotBounce 1.4s ease-in-out infinite;
+        }
+        .bp-dot:nth-child(1) { animation-delay: 0s; }
+        .bp-dot:nth-child(2) { animation-delay: 0.2s; }
+        .bp-dot:nth-child(3) { animation-delay: 0.4s; }
+        .bp-progress-bar {
+          width: 250px; height: 6px;
+          background: rgba(255,255,255,0.15);
+          border-radius: 3px;
+          overflow: hidden;
+          margin-top: 30px;
+          box-shadow: 0 0 20px rgba(76,175,80,0.3);
+        }
+        .bp-progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #4CAF50 0%, #8BC34A 25%, #4CAF50 50%, #8BC34A 75%, #4CAF50 100%);
+          background-size: 200% 100%;
+          width: 0%;
+          animation: progressAnim 3s ease-out forwards, shimmer 2s linear infinite;
+          box-shadow: 0 0 15px rgba(76,175,80,0.8);
+        }
+        @media (max-width: 768px) {
+          .bp-loader-container { gap: 30px; }
+          .bp-logo-container { width: 120px; height: 120px; }
+          .bp-glow-ring-outer { width: 150px; height: 150px; }
+          .bp-glow-ring-middle { width: 115px; height: 115px; }
+          .bp-glow-ring-inner { width: 80px; height: 80px; }
+          .bp-logo-image { width: 100px; height: 100px; }
+          .bp-loader-text { font-size: 20px; }
+          .bp-progress-bar { width: 200px; }
+        }
+      
+@media (prefers-reduced-motion: reduce) { .bp-loading-screen *, .bp-loading-screen::before { animation: none !important; } }

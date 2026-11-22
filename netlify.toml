@@ -1,0 +1,26 @@
+# Configuração de deploy do Netlify — Mapas Branco Peres
+# Use esta config ao conectar o repositório (Git) ao Netlify.
+# Para deploy manual (arrastar a pasta), basta soltar a pasta "dist" no Netlify.
+
+[build]
+  # Se o repositório tiver a pasta "frontend" na raiz, ajuste "base" para "frontend".
+  # Aqui assumimos que este arquivo está DENTRO da pasta do app (onde há package.json).
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Node 22 satisfaz os "engines" das dependências (evita erro de versão).
+  NODE_VERSION = "22"
+
+# ── Variáveis de ambiente necessárias no build (defina no painel do Netlify) ──
+# Site settings > Environment variables:
+#   VITE_SUPABASE_URL       = https://SEU-PROJETO.supabase.co
+#   VITE_SUPABASE_ANON_KEY  = sua-chave-anon
+# Observação: no deploy MANUAL (arrastar a pasta dist), o arquivo dist/runtime-config.js
+# já vem pronto e essas variáveis não são necessárias.
+
+# SPA fallback (também existe public/_redirects como reforço)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mapas-branco-peres.netlify.app/sitemap.xml

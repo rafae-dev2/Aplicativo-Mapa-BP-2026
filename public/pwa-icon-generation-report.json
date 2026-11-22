@@ -1,0 +1,500 @@
+{
+  "version": "v113-pwa-icon-transparent-fit",
+  "source": "/home/ubuntu/upload/whatsapp-preview-v8.png",
+  "source_size": "477x473",
+  "removed_edge_background_pixels": 55532,
+  "source_alpha_bbox": [
+    3,
+    2,
+    473,
+    470
+  ],
+  "standard_fit_ratio": 0.88,
+  "maskable_fit_ratio": 0.78,
+  "icons": {
+    "pwa-icon-72.png": {
+      "size": "72x72",
+      "fit_ratio": 0.88,
+      "bbox": [
+        4,
+        4,
+        67,
+        67
+      ],
+      "bbox_width": 63,
+      "bbox_height": 63,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 3161,
+      "max_opaque_radius_ratio": 0.9088,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 553
+    },
+    "pwa-icon-96.png": {
+      "size": "96x96",
+      "fit_ratio": 0.88,
+      "bbox": [
+        6,
+        6,
+        90,
+        90
+      ],
+      "bbox_width": 84,
+      "bbox_height": 84,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 5562,
+      "max_opaque_radius_ratio": 0.8899,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 934
+    },
+    "pwa-icon-128.png": {
+      "size": "128x128",
+      "fit_ratio": 0.88,
+      "bbox": [
+        7,
+        7,
+        120,
+        120
+      ],
+      "bbox_width": 113,
+      "bbox_height": 113,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 10004,
+      "max_opaque_radius_ratio": 0.9017,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 1780
+    },
+    "pwa-icon-144.png": {
+      "size": "144x144",
+      "fit_ratio": 0.88,
+      "bbox": [
+        8,
+        9,
+        135,
+        135
+      ],
+      "bbox_width": 127,
+      "bbox_height": 126,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 12516,
+      "max_opaque_radius_ratio": 0.8965,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 2088
+    },
+    "pwa-icon-152.png": {
+      "size": "152x152",
+      "fit_ratio": 0.88,
+      "bbox": [
+        9,
+        9,
+        143,
+        142
+      ],
+      "bbox_width": 134,
+      "bbox_height": 133,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 13937,
+      "max_opaque_radius_ratio": 0.8956,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 2317
+    },
+    "pwa-icon-180.png": {
+      "size": "180x180",
+      "fit_ratio": 0.88,
+      "bbox": [
+        11,
+        11,
+        169,
+        168
+      ],
+      "bbox_width": 158,
+      "bbox_height": 157,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 19339,
+      "max_opaque_radius_ratio": 0.8903,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 3047
+    },
+    "pwa-icon-192.png": {
+      "size": "192x192",
+      "fit_ratio": 0.88,
+      "bbox": [
+        11,
+        12,
+        180,
+        180
+      ],
+      "bbox_width": 169,
+      "bbox_height": 168,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 22125,
+      "max_opaque_radius_ratio": 0.8931,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 3581
+    },
+    "pwa-icon-384.png": {
+      "size": "384x384",
+      "fit_ratio": 0.88,
+      "bbox": [
+        23,
+        23,
+        361,
+        360
+      ],
+      "bbox_width": 338,
+      "bbox_height": 337,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 88337,
+      "max_opaque_radius_ratio": 0.8913,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 14221
+    },
+    "pwa-icon-512.png": {
+      "size": "512x512",
+      "fit_ratio": 0.88,
+      "bbox": [
+        30,
+        31,
+        481,
+        480
+      ],
+      "bbox_width": 451,
+      "bbox_height": 449,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 156973,
+      "max_opaque_radius_ratio": 0.8897,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 25185
+    },
+    "pwa-icon-512-transparent.png": {
+      "size": "512x512",
+      "fit_ratio": 0.88,
+      "bbox": [
+        30,
+        31,
+        481,
+        480
+      ],
+      "bbox_width": 451,
+      "bbox_height": 449,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 156973,
+      "max_opaque_radius_ratio": 0.8897,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 25185
+    },
+    "pwa-maskable-192.png": {
+      "size": "192x192",
+      "fit_ratio": 0.78,
+      "bbox": [
+        21,
+        21,
+        171,
+        170
+      ],
+      "bbox_width": 150,
+      "bbox_height": 149,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 17445,
+      "max_opaque_radius_ratio": 0.7931,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 0
+    },
+    "pwa-maskable-512.png": {
+      "size": "512x512",
+      "fit_ratio": 0.78,
+      "bbox": [
+        56,
+        57,
+        455,
+        454
+      ],
+      "bbox_width": 399,
+      "bbox_height": 397,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 122798,
+      "max_opaque_radius_ratio": 0.7867,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 0
+    },
+    "pwa-maskable-512-transparent.png": {
+      "size": "512x512",
+      "fit_ratio": 0.78,
+      "bbox": [
+        56,
+        57,
+        455,
+        454
+      ],
+      "bbox_width": 399,
+      "bbox_height": 397,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 122798,
+      "max_opaque_radius_ratio": 0.7867,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 0
+    },
+    "pwa-apple-touch-icon.png": {
+      "size": "180x180",
+      "fit_ratio": 0.88,
+      "bbox": [
+        11,
+        11,
+        169,
+        168
+      ],
+      "bbox_width": 158,
+      "bbox_height": 157,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 19339,
+      "max_opaque_radius_ratio": 0.8903,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 3047
+    },
+    "pwa-mstile-144.png": {
+      "size": "144x144",
+      "fit_ratio": 0.88,
+      "bbox": [
+        8,
+        9,
+        135,
+        135
+      ],
+      "bbox_width": 127,
+      "bbox_height": 126,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 12516,
+      "max_opaque_radius_ratio": 0.8965,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 2088
+    },
+    "icon-logo-96.png": {
+      "size": "96x96",
+      "fit_ratio": 0.88,
+      "bbox": [
+        6,
+        6,
+        90,
+        90
+      ],
+      "bbox_width": 84,
+      "bbox_height": 84,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 5562,
+      "max_opaque_radius_ratio": 0.8899,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 934
+    },
+    "icon-logo-192.png": {
+      "size": "192x192",
+      "fit_ratio": 0.88,
+      "bbox": [
+        11,
+        12,
+        180,
+        180
+      ],
+      "bbox_width": 169,
+      "bbox_height": 168,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 22125,
+      "max_opaque_radius_ratio": 0.8931,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 3581
+    },
+    "icon-logo-512.png": {
+      "size": "512x512",
+      "fit_ratio": 0.88,
+      "bbox": [
+        30,
+        31,
+        481,
+        480
+      ],
+      "bbox_width": 451,
+      "bbox_height": 449,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 156973,
+      "max_opaque_radius_ratio": 0.8897,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 25185
+    },
+    "icon-logo-maskable-192.png": {
+      "size": "192x192",
+      "fit_ratio": 0.78,
+      "bbox": [
+        21,
+        21,
+        171,
+        170
+      ],
+      "bbox_width": 150,
+      "bbox_height": 149,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 17445,
+      "max_opaque_radius_ratio": 0.7931,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 0
+    },
+    "icon-logo-maskable-512.png": {
+      "size": "512x512",
+      "fit_ratio": 0.78,
+      "bbox": [
+        56,
+        57,
+        455,
+        454
+      ],
+      "bbox_width": 399,
+      "bbox_height": 397,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 122798,
+      "max_opaque_radius_ratio": 0.7867,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 0
+    },
+    "icon-logo.png": {
+      "size": "512x512",
+      "fit_ratio": 0.88,
+      "bbox": [
+        30,
+        31,
+        481,
+        480
+      ],
+      "bbox_width": 451,
+      "bbox_height": 449,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 156973,
+      "max_opaque_radius_ratio": 0.8897,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 25185
+    },
+    "logo.png": {
+      "size": "512x512",
+      "fit_ratio": 0.88,
+      "bbox": [
+        30,
+        31,
+        481,
+        480
+      ],
+      "bbox_width": 451,
+      "bbox_height": 449,
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "opaque_pixels": 156973,
+      "max_opaque_radius_ratio": 0.8897,
+      "outside_canvas_circle_pixels": 0,
+      "outside_maskable_safe_circle_pixels": 25185
+    }
+  }
+}

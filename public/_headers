@@ -1,0 +1,80 @@
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# ── Arquivos que NUNCA devem ser cacheados ────────────────────────────────────
+
+# index.html: WhatsApp crawler sempre lê as meta tags atualizadas
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# version.json: fonte da verdade para o sistema de atualização forçada
+/version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+  Access-Control-Allow-Origin: *
+
+# service-worker.js: browser deve sempre buscar a versão mais recente
+/service-worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# runtime-config.js: configuração do Supabase deve acompanhar cada deploy
+/runtime-config.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+  Access-Control-Allow-Origin: *
+
+# ── Imagens OG para WhatsApp ──────────────────────────────────────────────────
+
+/og-whatsapp.jpg
+  Content-Type: image/jpeg
+  Cache-Control: public, max-age=86400
+  Access-Control-Allow-Origin: *
+
+/og-whatsapp.png
+  Content-Type: image/png
+  Cache-Control: public, max-age=86400
+  Access-Control-Allow-Origin: *
+
+/header-logo.png
+  Content-Type: image/png
+  Cache-Control: public, max-age=86400
+  Access-Control-Allow-Origin: *
+
+# ── GeoJSON: cache curto (Service Worker gerencia versioning via IndexedDB) ───
+
+/branco-peres.geojson
+  Cache-Control: public, max-age=3600
+  Content-Type: application/json
+  Access-Control-Allow-Origin: *
+
+# A extensão .mapdata pode parecer binária para o host. Declarar JSON permite
+# compressão automática do arquivo textual durante a transferência.
+/branco-peres.mapdata
+  Cache-Control: public, max-age=3600
+  Content-Type: application/json
+  Access-Control-Allow-Origin: *
+
+# HTML raiz mutável; os bundles possuem hash de conteúdo.
+/
+  Cache-Control: no-cache
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/app-shell-assets.json
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/service-worker-v3.js
+  Cache-Control: no-cache
+/notification-config.js
+  Cache-Control: no-cache
+
+/startup.css
+  Cache-Control: no-cache

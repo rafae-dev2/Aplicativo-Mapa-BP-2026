@@ -1,0 +1,139 @@
+{
+  "checks": [
+    {
+      "name": "Abertura original: fundo verde, logo centralizado e animação",
+      "ok": true,
+      "detail": {
+        "background": "linear-gradient(135deg, rgb(26, 71, 42) 0%, rgb(45, 106, 79) 50%, rgb(26, 71, 42) 100%)",
+        "logo": "url(\"http://127.0.0.1:4173/header-startup.webp\")",
+        "animation": "rotateClockwise",
+        "centerX": 195,
+        "centerY": 346,
+        "viewport": 390
+      }
+    },
+    {
+      "name": "Primeira abertura: interface e canvas do mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 18288
+      }
+    },
+    {
+      "name": "Digitar fundo 25 apenas filtra, sem mover o mapa",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "name": "Número com zero à esquerda apenas filtra, sem voo",
+      "ok": true
+    },
+    {
+      "name": "Número inexistente não move o mapa",
+      "ok": true
+    },
+    {
+      "name": "Enter sem setas confirma resultado e voa até o talhão",
+      "ok": true,
+      "detail": [
+        {
+          "method": "flyTo",
+          "args": [
+            {
+              "center": [
+                -51.030491818181815,
+                -21.489750303030306
+              ],
+              "zoom": 15,
+              "duration": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Toque em outro talhão provoca novo voo",
+      "ok": true,
+      "detail": [
+        {
+          "method": "flyTo",
+          "args": [
+            {
+              "center": [
+                -51.02988500000001,
+                -21.49129
+              ],
+              "zoom": 15,
+              "duration": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Primeira instalação prepara shell e dados para offline",
+      "ok": true,
+      "detail": [
+        {
+          "name": "mapas-branco-peres-static",
+          "count": 37
+        },
+        {
+          "name": "mapas-branco-peres-data",
+          "count": 2
+        },
+        {
+          "name": "mapbox-tiles",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "Migração de manutenção preserva shell, fila e dados locais",
+      "ok": true,
+      "detail": {
+        "marker": "nao-apagar",
+        "pending": "[]",
+        "deleted": "[]",
+        "index": true
+      }
+    },
+    {
+      "name": "Reabertura sem rede mostra o aplicativo e o mapa",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 1351
+      }
+    },
+    {
+      "name": "Ferramenta lazy carrega também sem rede",
+      "ok": true
+    },
+    {
+      "name": "Menu lateral lazy abre sem rede",
+      "ok": true
+    },
+    {
+      "name": "Falha dos dados não bloqueia a interface",
+      "ok": true
+    },
+    {
+      "name": "Botão Tentar novamente dispara busca e recupera os dados",
+      "ok": true
+    },
+    {
+      "name": "Rede lenta sem shell não retorna falso offline",
+      "ok": true,
+      "detail": {
+        "elapsedMs": 4898
+      }
+    },
+    {
+      "name": "Nenhuma exceção JavaScript não tratada",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "pageErrors": [],
+  "note": "Chromium headless local; Mapbox simulado e Supabase bloqueado. Tempos de laboratório, não do celular real."
+}

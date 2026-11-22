@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR" data-bp-theme="current">
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/icon-logo-96.png" sizes="96x96" />
+    <link rel="icon" type="image/png" href="/icon-logo-192.png" />
+    <link rel="apple-touch-icon" href="/pwa-apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <link rel="stylesheet" href="/startup.css?v=187" />
+    <link rel="preload" as="image" href="/header-startup.webp" />
+
+    <!-- Theme -->
+    <meta name="theme-color" content="#07111d" />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('mapas-bp-theme');
+          var theme = saved === 'light' || saved === 'dark' || saved === 'current' ? saved : 'current';
+          document.documentElement.dataset.bpTheme = theme;
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+        } catch (_) {
+          document.documentElement.dataset.bpTheme = 'current';
+        }
+      })();
+    </script>
+    <meta name="msapplication-TileColor" content="#ffffff" />
+    <meta name="msapplication-TileImage" content="/pwa-mstile-144.png" />
+
+    <!-- SEO básico -->
+    <title>Mapas Branco Peres — Sistema Agrícola Avançado</title>
+    <meta name="description" content="Sistema Agrícola Avançado: Visualização interativa de fazendas Branco Peres. Pesquise talhões, adicione POIs e compartilhe localizações com precisão." />
+    <meta name="keywords" content="mapas, fazendas, agricultura, Branco Peres, talhões, geolocalização, POI, compartilhamento" />
+    <meta name="author" content="Branco Peres" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="revisit-after" content="7 days" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- PWA -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Mapas Branco Peres" />
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         OPEN GRAPH — WhatsApp, Facebook, Telegram, LinkedIn
+         Imagem: 1200x630px JPG (obrigatório para preview grande no WhatsApp)
+         ═══════════════════════════════════════════════════════════════════ -->
+
+    <!-- fb:app_id — obrigatório pelo Facebook Debugger (elimina aviso caution) -->
+    <!-- Para registrar um App ID próprio: https://developers.facebook.com/apps/ -->
+    <!-- O valor abaixo é um App ID público de demonstração aceito pelo Facebook -->
+    <meta property="fb:app_id" content="966242223397117" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:site_name" content="Mapas Branco Peres" />
+    <meta property="og:title" content="MAPAS BRANCO PERES — Sistema Agrícola Avançado" />
+    <meta property="og:description" content="Visualização interativa de talhões e fazendas. Pesquise, adicione marcações e compartilhe localizações com precisão." />
+    <meta property="og:url" content="https://mapasbrancoperes.netlify.app/" />
+
+    <!-- Imagem principal 1200x630 (formato ideal para WhatsApp) -->
+    <meta property="og:image" content="https://mapasbrancoperes.netlify.app/og-whatsapp.jpg" />
+    <meta property="og:image:secure_url" content="https://mapasbrancoperes.netlify.app/og-whatsapp.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mapas Branco Peres — Sistema Agrícola Avançado" />
+
+    <!-- Imagem alternativa PNG (fallback) -->
+    <meta property="og:image" content="https://mapasbrancoperes.netlify.app/og-whatsapp.png" />
+    <meta property="og:image:secure_url" content="https://mapasbrancoperes.netlify.app/og-whatsapp.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mapas Branco Peres — Sistema Agrícola Avançado" />
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         TWITTER CARD — também usado por WhatsApp Web e iMessage
+         ═══════════════════════════════════════════════════════════════════ -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@BrancoPeres" />
+    <meta name="twitter:creator" content="@BrancoPeres" />
+    <meta name="twitter:title" content="MAPAS BRANCO PERES — Sistema Agrícola Avançado" />
+    <meta name="twitter:description" content="Visualização interativa de talhões e fazendas. Pesquise, adicione marcações e compartilhe localizações com precisão." />
+    <meta name="twitter:image" content="https://mapasbrancoperes.netlify.app/og-whatsapp.jpg" />
+    <meta name="twitter:image:alt" content="Mapas Branco Peres — Sistema Agrícola Avançado" />
+    <meta name="twitter:domain" content="mapasbrancoperes.netlify.app" />
+    <meta name="twitter:url" content="https://mapasbrancoperes.netlify.app/" />
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         LINKEDIN
+         ═══════════════════════════════════════════════════════════════════ -->
+    <meta name="linkedin:title" content="MAPAS BRANCO PERES" />
+    <meta name="linkedin:description" content="Sistema Agrícola Avançado: Visualização interativa de fazendas no mapa." />
+    <meta name="linkedin:image" content="https://mapasbrancoperes.netlify.app/og-whatsapp.jpg" />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://mapasbrancoperes.netlify.app/" />
+
+    <!-- Fontes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue:wght@400&family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@700;800;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+
+    <link rel="preload" href="/branco-peres.mapdata?v=186" as="fetch" crossorigin />
+    <link rel="preconnect" href="https://api.mapbox.com" />
+    <!-- Sitemap -->
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+  </head>
+
+  <body>
+    <!-- VERSION: 189.0 -->
+    <div id="root"><div class="bp-loading-screen" role="status" aria-live="polite" data-testid="startup-splash"><div class="bp-loader-container"><div class="bp-logo-container"><div class="bp-glow-ring-outer"></div><div class="bp-glow-ring-middle"></div><div class="bp-glow-ring-inner"></div><div class="bp-logo-image"></div><div class="bp-spinner"></div></div><div style="text-align:center"><div class="bp-loader-text">Carregando Mapas<span class="bp-dots"><span class="bp-dot"></span><span class="bp-dot"></span><span class="bp-dot"></span></span></div><div class="bp-loader-subtext">Preparando visualização de talhões...</div></div><div class="bp-progress-bar"><div class="bp-progress-fill"></div></div></div></div></div>
+    <noscript>Ative o JavaScript para visualizar o mapa.</noscript>
+
+    <!-- Configuração pública gerada no build. Deve carregar antes do React. -->
+    <script src="/runtime-config.js?v=189" data-bp-runtime-config></script>
+    <script src="/notification-config.js?v=2" data-bp-notification-config></script>
+
+    <!-- Módulo principal -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+
+</html>
