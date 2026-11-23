@@ -9,8 +9,10 @@ import POIManager, { POIManagerProvider } from '@/components/POIManager';
 import { useFetchWithRetry } from '@/hooks/useFetchWithRetry';
 import { validateGeoJSON, hasFeatures, type Fazenda, type GeoJSONData } from '@/lib/geojson-validator';
 import { decodeUtf8Base64 } from '@/lib/base64';
-import { RoutesGoogleMaps } from '@/components/RoutesGoogleMaps';
 import StartupOverlay from '@/components/StartupOverlay';
+import { mapPerformanceMonitor } from '@/lib/mapPerformanceMonitor';
+import { hotTalhoesCache } from '@/lib/hotTalhoesCache';
+import { registerBenchmarkMapInstance } from '@/lib/talhoesStressSimulator';
 
 const MenuLateral = lazy(() => import('@/components/MenuLateral'));
 
@@ -45,14 +47,30 @@ export default function Home() {
   }, []);
 
 
-  // Fetch GeoJSON com retry automático
-  const { data: rawGeoJSON, loading, error, retry } = useFetchWithRetry<unknown>(
+  // Cache persistente (IndexedDB) dos polígonos dos talhões mais acessados
+  // para renderização quase instantânea ao abrir o app ou voltar de rede instável.
+  const [hotTalhoesGeoJSON, setHotTalhoesGeoJSON] = useState<GeoJSONData | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void hotTalhoesCache.loadFeatureCollection().then((fc) => {
+      if (active && fc && fc.features.length > 0) {
+        setHotTalhoesGeoJSON(fc);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch GeoJSON com hidratação imediata do IndexedDB + revalidação em segundo plano
+  const { data: rawGeoJSON, loading, error, source: geoSource, retry } = useFetchWithRetry<unknown>(
     '/branco-peres.mapdata?v=186',
-    { retries: 1, retryDelay: 800, timeout: 12000 }
+    { retries: 1, retryDelay: 800, timeout: 12000, offlineKey: 'branco-peres-mapdata' }
   );
 
-  // Validar e processar GeoJSON
-  const geoJSONData = useMemo<GeoJSONData | null>(() => {
+  // Validar e processar GeoJSON completo
+  const fullGeoJSONData = useMemo<GeoJSONData | null>(() => {
     if (!rawGeoJSON) return null;
     const validated = validateGeoJSON(rawGeoJSON);
     if (!validated) {
@@ -66,11 +84,37 @@ export default function Home() {
     return validated;
   }, [rawGeoJSON]);
 
+  // Enquanto o pacote completo ainda está carregando em rede instável, exibe
+  // imediatamente os polígonos dos talhões mais acessados salvos no IndexedDB.
+  const geoJSONData = fullGeoJSONData ?? hotTalhoesGeoJSON;
+
+  // Pré-aquece o cache persistente de talhões prioritários na primeira carga completa
+  useEffect(() => {
+    if (!fullGeoJSONData?.features?.length) return;
+    void hotTalhoesCache.seedIfEmpty(fullGeoJSONData.features, 24);
+  }, [fullGeoJSONData]);
+
   // Extrair fazendas do GeoJSON
   const fazendas = useMemo<Fazenda[]>(() => {
     if (!geoJSONData) return [];
     return geoJSONData.features.map(f => f.properties);
   }, [geoJSONData]);
+
+  // Monitor de performance: mede carregamento + validação dos polígonos das fazendas
+  const geoPerfMeasuredRef = useRef(false);
+  useEffect(() => {
+    mapPerformanceMonitor.startPhase('farm-geojson-load');
+  }, []);
+
+  useEffect(() => {
+    if (!geoJSONData || geoPerfMeasuredRef.current) return;
+    geoPerfMeasuredRef.current = true;
+    mapPerformanceMonitor.endPhase('farm-geojson-load', {
+      featureCount: geoJSONData.features.length,
+      source: fullGeoJSONData ? geoSource : 'hot-talhoes-idb',
+      online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    });
+  }, [geoJSONData, fullGeoJSONData, geoSource]);
 
 
 
@@ -263,6 +307,8 @@ export default function Home() {
     setSelectedTalhao(talhao);
     setSelectionFocusZoom(zoomOverride);
     setSelectionFocusVersion((version) => version + 1);
+    // Persiste o polígono acessado no cache IndexedDB de talhões mais frequentes
+    void hotTalhoesCache.recordAccess(feature);
 
     // O MapContainer executa o voo com sua própria instância Mapbox, após
     // confirmar que o mapa e a geometria selecionada estão prontos.
@@ -270,6 +316,7 @@ export default function Home() {
 
   const handleMapReady = useCallback((map: any) => {
     setMapInstance(map);
+    registerBenchmarkMapInstance(map);
   }, []);
 
   const handleLocateCoordinates = (lat: number, lng: number) => {
@@ -291,6 +338,13 @@ export default function Home() {
     // Atualizar URL sem recarregar página
     initialSelectionHandledRef.current = true;
     updateSelectionUrl(fundo, talhao);
+
+    const clickedFeature = geoJSONData?.features.find(
+      (f) => f.properties.FAZENDA === fundo && f.properties.TALHAO === talhao
+    );
+    if (clickedFeature) {
+      void hotTalhoesCache.recordAccess(clickedFeature);
+    }
   };
 
   // Listener para eventos customizados
@@ -360,7 +414,7 @@ export default function Home() {
 
         {/* Mapa - Ocupa todo o espaço restante */}
         <div className="flex-1 relative">
-          {(loading || error || !geoJSONData) && (
+          {!geoJSONData && (loading || error) && (
             <div role="status" aria-live="polite" style={{ position: 'absolute', top: 90, left: 12, zIndex: 45, maxWidth: 'min(310px, calc(100vw - 84px))', padding: '10px 14px', borderRadius: 12, background: 'var(--bp-glass-bg-strong, #142333)', color: 'var(--bp-text-primary, #fff)', boxShadow: '0 4px 18px rgba(0,0,0,.25)', fontSize: 13 }}>
               {loading ? 'Carregando os talhões… O mapa já pode ser usado.' : <>
                 <p style={{ margin: '0 0 8px' }}>Não foi possível carregar os talhões. Verifique a conexão ou o download offline.</p>
@@ -382,16 +436,6 @@ export default function Home() {
           
           {/* POI Manager */}
           <POIManager onLocateCoordinates={handleLocateCoordinates} hidden={immersive} />
-
-          {/* Rotas Google Maps - Mostrar apenas quando fazenda selecionada */}
-          {!immersive && selectedFundo && selectedTalhao && (
-            <RoutesGoogleMaps
-              selectedFundo={selectedFundo}
-              selectedTalhao={selectedTalhao}
-              geojsonData={geoJSONData}
-              isFullscreen={isFullscreen}
-            />
-          )}
         </div>
       </div>
     </POIManagerProvider>

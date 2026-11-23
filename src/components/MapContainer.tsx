@@ -1,8 +1,9 @@
 import React, { lazy, Suspense, useRef, useState, useEffect, useCallback, useMemo } from 'react';
-import { Maximize2, SlidersHorizontal, X, Eye, Compass, Construction, PencilRuler, Plus as PlusIcon, Satellite, Map as MapIcon, Wrench, ChevronDown, ChevronUp, Flame, LocateFixed } from 'lucide-react';
+import { Maximize2, SlidersHorizontal, X, Eye, Compass, Construction, PencilRuler, Plus as PlusIcon, Satellite, Map as MapIcon, Wrench, ChevronDown, ChevronUp, Flame, LocateFixed, DownloadCloud, WifiOff } from 'lucide-react';
 import RouteNavigator from './RouteNavigator';
 import MapOfflineControls from './MapOfflineControls';
-import { PoiCategoryIcon, PoiMarkerIcon } from './PoiMarkerIcon';
+import MapVisibilityControl from './MapVisibilityControl';
+import { PoiCategoryIcon, PoiMarkerIcon, WATER_TRUCK_ICON } from './PoiMarkerIcon';
 import MapBottomSheet from './MapBottomSheet';
 import { useTheme, type Theme } from '@/contexts/ThemeContext';
 
@@ -18,6 +19,28 @@ import { decodeUtf8Base64 } from '@/lib/base64';
 import { MAP_CONFIG, COLORS } from '@/config/constants';
 import type { LayerProps } from 'react-map-gl';
 import { useMapOptimization } from '@/hooks/useMapOptimization';
+import { getGuardedMapboxLib } from '@/lib/mapboxFogGuard';
+import {
+  WATER_TRUCK_CATEGORIES,
+  TRUCK_CATEGORIES,
+  WATER_AND_TRUCK_CATEGORIES,
+  isGroupHidden,
+  toggleCategoryGroup,
+  filterVisiblePois,
+  countCategoryGroup,
+  parseHiddenCategories,
+  serializeHiddenCategories,
+} from '@/lib/poiVisibility';
+import {
+  OFFLINE_BASE_STORAGE_KEY,
+  OFFLINE_MODE_STORAGE_KEY,
+  type OfflineBaseMode,
+  createOfflineCartographicStyle,
+  loadOfflineDataset,
+  saveOfflineDataset,
+} from '@/lib/offlineMapEngine';
+import { mapPerformanceMonitor } from '@/lib/mapPerformanceMonitor';
+import { poiReconnectProfiler } from '@/lib/poiReconnectProfiler';
 
 // Componentes usados somente após uma interação ficam fora do chunk inicial.
 // As fronteiras Suspense locais abaixo não suspendem nem remontam o <Map>.
@@ -165,12 +188,21 @@ export default function MapContainer({
   immersive = false,
   onToggleImmersive,
 }: MapContainerProps) {
-  const { setShowModal, setSelectedCoords, pois, updatePOI, setPois, importSharedPois, popupData, setPopupData, deletePOI, addPOI } = usePOIManager();
+  const { setShowModal, setSelectedCoords, pois, updatePOI, setPois, importSharedPois, popupData, setPopupData, deletePOI, addPOI, pendingCount, forceSync } = usePOIManager();
   const { theme } = useTheme();
   const farmPalette = useMemo(() => createFarmLayerPalette(theme), [theme]);
   const farmLayers = useMemo(() => createFarmLayers(theme), [theme]);
   const { preloadGeoJSON, optimizeRendering, prewarmTiles, initDB } = useMapOptimization();
   const mapRef = useRef<MapRef>(null);
+  const mountStartRef = useRef<number>(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const initialMarkersMeasuredRef = useRef(false);
+  const visiblePoisRef = useRef<POI[]>([]);
+
+  useEffect(() => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    mapPerformanceMonitor.recordPhase('map-shell-mount', Math.max(0, now - mountStartRef.current));
+    mapPerformanceMonitor.startPhase('map-style-load');
+  }, []);
   // ─────────────────────────────────────────────────────────────────────────
   // Visibilidade dos marcadores (estilo Google Maps) + filtros por categoria.
   // Tudo é ajustável pelo usuário no painel "Camadas e Filtros" e fica salvo.
@@ -193,8 +225,44 @@ export default function MapContainer({
   });
   // Categorias ocultas (filtro). Vazio = mostra todas.
   const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(() => {
-    try { const a = JSON.parse(localStorage.getItem(POI_HIDDEN_CATS_KEY) || '[]'); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); }
+    try { return parseHiddenCategories(localStorage.getItem(POI_HIDDEN_CATS_KEY)); } catch { return new Set(); }
   });
+  // ── Modo Offline Profissional ─────────────────────────────────────────────
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [offlineModeEnabled, setOfflineModeEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem(OFFLINE_MODE_STORAGE_KEY) === '1'; } catch { return false; }
+  });
+  const [offlineBaseMode, setOfflineBaseMode] = useState<OfflineBaseMode>(() => {
+    try {
+      const saved = localStorage.getItem(OFFLINE_BASE_STORAGE_KEY);
+      return saved === 'cached-satellite' ? 'cached-satellite' : 'cartographic';
+    } catch {
+      return 'cartographic';
+    }
+  });
+  const [showOfflineCenter, setShowOfflineCenter] = useState(false);
+  const [viewportBounds, setViewportBounds] = useState<{ west: number; south: number; east: number; north: number } | null>(null);
+  const effectiveOffline = !isOnline || offlineModeEnabled;
+  const useCartographicOffline = effectiveOffline && offlineBaseMode === 'cartographic';
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(OFFLINE_MODE_STORAGE_KEY, offlineModeEnabled ? '1' : '0'); } catch { /* noop */ }
+  }, [offlineModeEnabled]);
+
+  useEffect(() => {
+    try { localStorage.setItem(OFFLINE_BASE_STORAGE_KEY, offlineBaseMode); } catch { /* noop */ }
+  }, [offlineBaseMode]);
   // Tamanho (escala) dos ícones das marcações. 1 = padrão, 0.7 = padrão sugerido (mais leve).
   const [markerScale, setMarkerScale] = useState<number>(() => {
     const v = parseFloat(localStorage.getItem(POI_SCALE_KEY) || '');
@@ -233,7 +301,7 @@ export default function MapContainer({
   // Persistência
   useEffect(() => { try { localStorage.setItem(POI_ZOOM_KEY, String(iconMinZoom)); } catch { /* noop */ } }, [iconMinZoom]);
   useEffect(() => { try { localStorage.setItem(POI_LABELS_KEY, showLabels ? '1' : '0'); } catch { /* noop */ } }, [showLabels]);
-  useEffect(() => { try { localStorage.setItem(POI_HIDDEN_CATS_KEY, JSON.stringify(Array.from(hiddenCategories))); } catch { /* noop */ } }, [hiddenCategories]);
+  useEffect(() => { try { localStorage.setItem(POI_HIDDEN_CATS_KEY, serializeHiddenCategories(hiddenCategories)); } catch { /* noop */ } }, [hiddenCategories]);
   useEffect(() => { try { localStorage.setItem(POI_SCALE_KEY, String(markerScale)); } catch { /* noop */ } }, [markerScale]);
 
   useEffect(() => {
@@ -258,6 +326,10 @@ export default function MapContainer({
       if (next.has(cat)) next.delete(cat); else next.add(cat);
       return next;
     });
+  }, []);
+
+  const toggleVisibilityGroup = useCallback((categories: readonly string[]) => {
+    setHiddenCategories((prev) => toggleCategoryGroup(prev, categories));
   }, []);
   // Zoom de abertura do mapa (definido pelo usuário). Padrão sugerido: 11.5.
   const POI_DEFAULT_ZOOM_KEY = 'mapas-bp-default-zoom';
@@ -521,18 +593,40 @@ export default function MapContainer({
 
   // Os polígonos vêm da Home, que já carregou o GeoJSON para a busca. Evita
   // baixar o arquivo de fazendas uma segunda vez ao montar o mapa. Rótulos são
-  // complementares e carregam separadamente, sem bloquear as áreas.
+  // complementares e persistem em IndexedDB para funcionar offline.
   useEffect(() => {
     let cancelled = false;
-      fetch('/branco-peres-labels.json?v=186', { cache: 'force-cache' })
-      .then((response) => {
+    const loadLabels = async () => {
+      mapPerformanceMonitor.startPhase('farm-labels-load');
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        const cached = await loadOfflineDataset<any>('branco-peres-labels');
+        if (!cancelled && Array.isArray(cached?.features)) {
+          setLabelsData(cached);
+          mapPerformanceMonitor.endPhase('farm-labels-load', { source: 'indexeddb', count: cached.features.length });
+          return;
+        }
+      }
+      try {
+        const response = await fetch('/branco-peres-labels.json?v=186', { cache: 'force-cache' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-      })
-      .then((labels) => {
-        if (!cancelled && Array.isArray(labels.features)) setLabelsData(labels);
-      })
-      .catch((error) => console.warn('Rótulos do mapa indisponíveis:', error));
+        const labels = await response.json();
+        if (!cancelled && Array.isArray(labels.features)) {
+          setLabelsData(labels);
+          mapPerformanceMonitor.endPhase('farm-labels-load', { source: 'network', count: labels.features.length });
+          void saveOfflineDataset('branco-peres-labels', labels);
+        }
+      } catch (error) {
+        const cached = await loadOfflineDataset<any>('branco-peres-labels');
+        if (!cancelled && Array.isArray(cached?.features)) {
+          setLabelsData(cached);
+          mapPerformanceMonitor.endPhase('farm-labels-load', { source: 'indexeddb-fallback', count: cached.features.length });
+        } else {
+          mapPerformanceMonitor.endPhase('farm-labels-load', { source: 'unavailable', count: 0 });
+          console.warn('Rótulos do mapa indisponíveis:', error);
+        }
+      }
+    };
+    void loadLabels();
     return () => {
       cancelled = true;
     };
@@ -688,6 +782,8 @@ export default function MapContainer({
   }, []);
 
   const forceStyleReload = useCallback(() => {
+    // Em modo offline não forçamos recarregamento remoto de estilo (evita tela preta ou erro de rede).
+    if (effectiveOffline) return true;
     const map = mapRef.current?.getMap?.();
     if (!map) return false;
     try {
@@ -701,10 +797,14 @@ export default function MapContainer({
     } catch {
       return false;
     }
-  }, [mapStyle]);
+  }, [effectiveOffline, mapStyle]);
 
   const reloadMapManually = useCallback(() => {
     setMapNeedsReload(false);
+    if (effectiveOffline) {
+      setOfflineBaseMode('cartographic');
+      return;
+    }
     const ok = forceStyleReload();
     // Se o setStyle não resolver em 2 s, recarrega a página inteira.
     window.setTimeout(() => {
@@ -713,7 +813,7 @@ export default function MapContainer({
         try { window.location.reload(); } catch { /* noop */ }
       }
     }, 2000);
-  }, [forceStyleReload, isCanvasBlack]);
+  }, [effectiveOffline, forceStyleReload, isCanvasBlack]);
 
   const clearWatchdog = useCallback(() => {
     watchdogTimersRef.current.forEach((t) => window.clearTimeout(t));
@@ -722,6 +822,7 @@ export default function MapContainer({
 
   const startBlackCanvasWatchdog = useCallback(() => {
     clearWatchdog();
+    if (effectiveOffline) return;
     // Amostras aos 2, 3.5 e 5.5 s após resume. Se o canvas estiver preto,
     // recarregamos o estilo (silenciosamente) para rebaixar os tiles. O banner
     // manual só aparece se o CONTEXTO WebGL foi realmente perdido (quebra dura),
@@ -744,7 +845,7 @@ export default function MapContainer({
       }, delay);
       watchdogTimersRef.current.push(t);
     });
-  }, [clearWatchdog, forceStyleReload, isCanvasBlack, isContextLost]);
+  }, [clearWatchdog, effectiveOffline, forceStyleReload, isCanvasBlack, isContextLost]);
 
   const recoverMapAfterResume = useCallback((reason = 'resume', opts?: { watchdog?: boolean; forceReload?: boolean }) => {
     const runWatchdog = opts?.watchdog !== false;
@@ -868,11 +969,29 @@ export default function MapContainer({
     [onAreaClick]
   );
 
+  const syncViewportBounds = useCallback(() => {
+    try {
+      const map = mapRef.current?.getMap?.();
+      const b = map?.getBounds?.();
+      if (!b) return;
+      setViewportBounds({
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      });
+    } catch { /* noop */ }
+  }, []);
+
   const handleMapLoad = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (map) {
+      mapPerformanceMonitor.endPhase('map-style-load', {
+        online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      });
       onMapReady?.(map);
       setMapReady(true);
+      syncViewportBounds();
       recoverMapAfterResume('load', { watchdog: false });
       try { updateZoom(map.getZoom()); } catch { /* noop */ }
 
@@ -1068,9 +1187,98 @@ export default function MapContainer({
 
   // Marcações visíveis após o filtro por categoria.
   const visiblePois = useMemo(
-    () => uniquePois.filter((p) => !hiddenCategories.has(p.category || 'marcacao')),
+    () => filterVisiblePois(uniquePois, hiddenCategories),
     [uniquePois, hiddenCategories]
   );
+  visiblePoisRef.current = visiblePois;
+
+  // Mede pintura inicial dos marcadores POI assim que o mapa e os pontos estão prontos
+  useEffect(() => {
+    if (!mapReady || visiblePois.length === 0 || initialMarkersMeasuredRef.current) return;
+    initialMarkersMeasuredRef.current = true;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const rafId = window.requestAnimationFrame(() => {
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+      mapPerformanceMonitor.recordPhase('poi-markers-render', Math.max(0, elapsed), {
+        visibleCount: visiblePois.length,
+        totalCount: uniquePois.length,
+      });
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [mapReady, visiblePois.length, uniquePois.length]);
+
+  // Mede a pintura final dos marcadores POI após retorno da conexão offline
+  useEffect(() => {
+    const handleReconnectPoisUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ count?: number }>).detail;
+      const totalCount = Number(detail?.count ?? visiblePoisRef.current.length);
+      window.requestAnimationFrame(() => {
+        const visibleCount = visiblePoisRef.current.length;
+        mapPerformanceMonitor.endPhase('reconnect-poi-render', {
+          visibleCount,
+          totalCount,
+        });
+        mapPerformanceMonitor.completeReconnectCycle(totalCount);
+        poiReconnectProfiler.markStageEnd('markers-paint', {
+          visibleCount,
+          totalCount,
+        });
+        poiReconnectProfiler.finishCycle({
+          poiCount: totalCount,
+          visibleCount,
+        });
+      });
+    };
+    window.addEventListener('bp-pois-reconnect-updated', handleReconnectPoisUpdated);
+    return () => window.removeEventListener('bp-pois-reconnect-updated', handleReconnectPoisUpdated);
+  }, []);
+
+  const allFarmBounds = useMemo<GeoJSONBounds | null>(() => {
+    if (!geojsonData?.features?.length) return null;
+    return getFeaturesBounds(geojsonData.features);
+  }, [geojsonData]);
+
+  const offlineCartographicStyle = useMemo(() => {
+    const bounds = allFarmBounds
+      ? {
+          west: allFarmBounds[0][0],
+          south: allFarmBounds[0][1],
+          east: allFarmBounds[1][0],
+          north: allFarmBounds[1][1],
+        }
+      : undefined;
+    return createOfflineCartographicStyle(theme, bounds);
+  }, [theme, allFarmBounds]);
+
+  const activeMapStyle = useCartographicOffline ? offlineCartographicStyle : mapStyle;
+
+  // No modo cartográfico 100% offline (sem glyphs remotos), exibimos os números
+  // dos talhões visíveis na tela com recorte por viewport (máximo 48 por quadro).
+  const offlineVisibleLabels = useMemo(() => {
+    if (!useCartographicOffline || !labelsData?.features?.length || zoom < 12.25) return [];
+    const b = viewportBounds;
+    const candidates: Array<{ id: string; lng: number; lat: number; talhao: string; area: number }> = [];
+    for (const f of labelsData.features) {
+      const coords = f?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) continue;
+      const [lng, lat] = coords;
+      if (b && (lng < b.west || lng > b.east || lat < b.south || lat > b.north)) continue;
+      candidates.push({
+        id: `${f.properties?.FAZENDA ?? ''}-${f.properties?.TALHAO ?? ''}`,
+        lng,
+        lat,
+        talhao: String(f.properties?.TALHAO ?? ''),
+        area: Number(f.properties?.AREA_TOTAL ?? 0),
+      });
+    }
+    candidates.sort((a, bItem) => bItem.area - a.area);
+    return candidates.slice(0, 48);
+  }, [useCartographicOffline, labelsData, zoom, viewportBounds]);
+
+  const waterHidden = isGroupHidden(hiddenCategories, WATER_TRUCK_CATEGORIES);
+  const trucksHidden = isGroupHidden(hiddenCategories, TRUCK_CATEGORIES);
+  const waterPoiCount = useMemo(() => countCategoryGroup(uniquePois, WATER_TRUCK_CATEGORIES), [uniquePois]);
+  const truckPoiCount = useMemo(() => countCategoryGroup(uniquePois, TRUCK_CATEGORIES), [uniquePois]);
 
   // Regras de exibição (estilo Google Maps), agora controláveis pelo usuário.
   const showIcons = zoom >= iconMinZoom;
@@ -1340,6 +1548,7 @@ export default function MapContainer({
       `}</style>
       <Map
         ref={mapRef}
+        mapLib={getGuardedMapboxLib()}
         mapboxAccessToken={MAP_CONFIG.MAPBOX_ACCESS_TOKEN}
         // As camadas atuais não precisam de MSAA; manter antialias desligado
         // reduz custo de criação e renderização do contexto WebGL.
@@ -1353,13 +1562,21 @@ export default function MapContainer({
           zoom: defaultZoom ?? MAP_CONFIG.DEFAULT_ZOOM,
         }}
         style={{ width: '100%', height: '100%' }}
-        mapStyle={mapStyle}
+        mapStyle={activeMapStyle as any}
         minZoom={MAP_CONFIG.MIN_ZOOM}
         maxZoom={MAP_CONFIG.MAX_ZOOM}
         onLoad={handleMapLoad}
         onClick={handleMapClick}
         onZoom={(e) => updateZoom(e.viewState.zoom)}
-        onZoomEnd={(e) => updateZoom(e.viewState.zoom)}
+        onZoomEnd={(e) => { updateZoom(e.viewState.zoom); syncViewportBounds(); }}
+        onMoveEnd={syncViewportBounds}
+        onError={() => {
+          // Se estiver sem internet e o estilo remoto de satélite falhar, alterna
+          // automaticamente para o mapa cartográfico local para nunca travar o uso.
+          if (!navigator.onLine && offlineBaseMode === 'cached-satellite') {
+            setOfflineBaseMode('cartographic');
+          }
+        }}
         interactiveLayerIds={['fazendas-fill']}
       >
         {/* Todas as fazendas — Glass Liquid Theme */}
@@ -1376,9 +1593,8 @@ export default function MapContainer({
           </Source>
         )}
 
-        {/* Números dos talhões — usa fonte de pontos únicos por (FAZ, TAL)
-            para evitar sobreposição de rótulos em MultiPolygons. */}
-        {labelsData && (
+        {/* Números dos talhões — fonte vetorial quando o estilo possui glyphs */}
+        {labelsData && !useCartographicOffline && (
           <Source id="fazendas-labels-src" type="geojson" data={labelsData}>
             <Layer
               id="fazendas-labels"
@@ -1411,6 +1627,27 @@ export default function MapContainer({
             />
           </Source>
         )}
+
+        {/* Rótulos locais de talhões no modo cartográfico 100% offline (sem glyphs externos) */}
+        {useCartographicOffline && offlineVisibleLabels.map((lbl) => (
+          <Marker key={`off-lbl-${lbl.id}`} longitude={lbl.lng} latitude={lbl.lat} anchor="center">
+            <span
+              style={{
+                pointerEvents: 'none',
+                fontSize: 10,
+                fontWeight: 800,
+                color: theme === 'light' ? '#1e293b' : '#f1f5f9',
+                textShadow: theme === 'light'
+                  ? '0 0 3px rgba(255,255,255,0.95)'
+                  : '0 1px 4px rgba(0,0,0,0.9)',
+                userSelect: 'none',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {lbl.talhao}
+            </span>
+          </Marker>
+        ))}
 
         {/* Área selecionada com destaque — Glass Liquid Accent */}
         {selectedGeoJSON && (
@@ -1854,6 +2091,35 @@ export default function MapContainer({
           </div>
         </div>
 
+        {/* Controle rápido de visibilidade: ocultar represas, pegadores de água e caminhões em 1 toque */}
+        <MapVisibilityControl
+          pois={uniquePois}
+          hiddenCategories={hiddenCategories}
+          onToggleGroup={toggleVisibilityGroup}
+          onShowAll={() => setHiddenCategories(new Set())}
+          onOpenAdvancedLayers={() => setShowLayersPanel(true)}
+        />
+
+        {/* Botão direto da Central do Mapa Offline */}
+        <button
+          type="button"
+          data-testid="offline-center-btn"
+          onClick={() => { closeToolsMenu(); setShowOfflineCenter(true); }}
+          className={`bp-map-essential-control glass-liquid-button relative flex items-center justify-center ${
+            effectiveOffline ? 'is-active' : ''
+          }`}
+          aria-label={effectiveOffline ? 'Central do Mapa Offline (Modo offline ativo)' : 'Abrir Central do Mapa Offline'}
+          title={effectiveOffline ? 'Modo offline ativo — gerenciar mapas offline' : 'Mapa offline — baixar áreas e usar sem internet'}
+          style={{
+            minWidth: 44,
+            minHeight: 44,
+            color: !isOnline ? '#fbbf24' : offlineModeEnabled ? 'var(--bp-accent)' : undefined,
+            borderColor: !isOnline ? 'rgba(251,191,36,0.5)' : offlineModeEnabled ? 'var(--bp-accent-border)' : undefined,
+          }}
+        >
+          {effectiveOffline ? <WifiOff size={19} strokeWidth={2.35} /> : <DownloadCloud size={19} strokeWidth={2.35} />}
+        </button>
+
         {toolsMenuMounted && (
           <div id="map-tools-menu" data-testid="map-tools-menu" className={`bp-tools-menu-panel ${showToolsMenu ? 'is-open' : 'is-closing'}`} role="dialog" aria-label="Ferramentas do mapa">
             <div className="bp-tools-menu-header">
@@ -1990,33 +2256,22 @@ export default function MapContainer({
             <span className="bp-tool-label">Desenho</span>
         </button>
 
-        {/* Baixar área para uso offline + indicador online/offline do mapa */}
-        <MapOfflineControls mapRef={mapRef} />
+        {/* Atalho para a Central do Mapa Offline dentro de Ferramentas */}
+        <button
+          type="button"
+          data-testid="download-area-btn"
+          onClick={() => { closeToolsMenu(); setShowOfflineCenter(true); }}
+          className={`bp-map-offline-download bp-tool-button glass-liquid-button w-10 h-10 flex items-center justify-center rounded-xl shadow-2xl transition text-lg ${
+            effectiveOffline ? 'bg-amber-400/20 text-amber-200' : 'text-white hover:bg-white/10'
+          }`}
+          aria-label="Abrir Central do Mapa Offline"
+          title="Baixar áreas e configurar modo sem internet"
+        >
+          {effectiveOffline ? <WifiOff size={18} /> : <DownloadCloud size={18} />}
+          <span className="bp-tool-label">Offline</span>
+        </button>
 
         {/* Adicionar marcação no centro do mapa — forma garantida de adicionar */}
-        <button
-          data-testid="add-marker-btn"
-          onClick={() => {
-            const map = mapRef.current?.getMap?.() ? mapRef.current.getMap() : mapRef.current;
-            const c = map?.getCenter?.();
-            const lng = c ? c.lng : MAP_CONFIG.DEFAULT_CENTER.lng;
-            const lat = c ? c.lat : MAP_CONFIG.DEFAULT_CENTER.lat;
-            window.dispatchEvent(new CustomEvent('openPoiModal', {
-              detail: {
-                fundo: selectedFundo != null ? String(selectedFundo) : 'N/A',
-                talhao: selectedTalhao != null ? String(selectedTalhao) : 'N/A',
-                lng, lat,
-                isUnmarkedArea: selectedFundo == null,
-              },
-            }));
-          }}
-          className="bp-tool-button bp-tool-add-marker glass-liquid-button w-10 h-10 flex items-center justify-center rounded-xl shadow-2xl transition text-lg bg-[#ADFF2F]/20 text-[#ADFF2F] hover:bg-[#ADFF2F]/30 font-black"
-          aria-label="Adicionar marcação no centro do mapa"
-          title="Adicionar marcação no centro do mapa"
-        >
-            <PlusIcon size={24} strokeWidth={2.8} />
-            <span className="bp-tool-label">Adicionar</span>
-        </button>
         <button
           data-testid="add-marker-btn"
           onClick={() => {
@@ -2045,6 +2300,24 @@ export default function MapContainer({
           </div>
         )}
       </div>
+
+      {/* Central do Mapa Offline (modal completo + banner compacto quando offline) */}
+      <MapOfflineControls
+        mapRef={mapRef}
+        geojsonData={geojsonData}
+        labelsData={labelsData}
+        farmBounds={allFarmBounds}
+        poiCount={uniquePois.length}
+        pendingSyncCount={pendingCount}
+        onForceSync={forceSync}
+        isOnline={isOnline}
+        offlineModeEnabled={offlineModeEnabled}
+        onToggleOfflineMode={setOfflineModeEnabled}
+        offlineBaseMode={offlineBaseMode}
+        onChangeOfflineBaseMode={setOfflineBaseMode}
+        open={showOfflineCenter}
+        onOpenChange={setShowOfflineCenter}
+      />
 
       {/* ── Painel "Camadas e Filtros" ──────────────────────────────────────
            Controla: (1) a partir de qual zoom as marcações aparecem,
@@ -2144,6 +2417,53 @@ export default function MapContainer({
               <span style={{ position: 'absolute', top: 2, left: showLabels ? 18 : 2, width: 14, height: 14, borderRadius: '50%', background: '#0a101a', transition: 'left 0.2s' }} />
             </span>
           </button>
+
+          {/* (2b) Ocultar rápido: Represas / Pegadores de Água e Caminhões */}
+          <div data-testid="layers-quick-vehicles" style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 8 }}>Represas, pegadores e caminhões</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button
+                type="button"
+                data-testid="layers-toggle-represa"
+                onClick={() => toggleVisibilityGroup(WATER_TRUCK_CATEGORIES)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+                  padding: '8px 10px', borderRadius: 11, cursor: 'pointer',
+                  background: !waterHidden ? 'rgba(14,165,233,0.14)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${!waterHidden ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                  color: '#e8edf4',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700 }}>
+                  <img src={WATER_TRUCK_ICON} alt="" aria-hidden="true" style={{ width: 18, height: 18, objectFit: 'contain', opacity: waterHidden ? 0.45 : 1 }} />
+                  Represas / Pegadores ({waterPoiCount})
+                </span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: !waterHidden ? '#38bdf8' : '#9fb0c3' }}>
+                  {waterHidden ? 'Oculto' : 'Visível'}
+                </span>
+              </button>
+              <button
+                type="button"
+                data-testid="layers-toggle-trucks"
+                onClick={() => toggleVisibilityGroup(TRUCK_CATEGORIES)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+                  padding: '8px 10px', borderRadius: 11, cursor: 'pointer',
+                  background: !trucksHidden ? 'rgba(249,115,22,0.14)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${!trucksHidden ? 'rgba(251,146,60,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                  color: '#e8edf4',
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700 }}>
+                  <img src="/poi-pin-transport-dump-truck.png" alt="" aria-hidden="true" style={{ width: 20, height: 16, objectFit: 'contain', opacity: trucksHidden ? 0.45 : 1 }} />
+                  Caminhões ({truckPoiCount})
+                </span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: !trucksHidden ? '#fb923c' : '#9fb0c3' }}>
+                  {trucksHidden ? 'Oculto' : 'Visível'}
+                </span>
+              </button>
+            </div>
+          </div>
 
           {/* (3) Filtro por categoria */}
           <div>

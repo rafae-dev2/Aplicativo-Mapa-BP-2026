@@ -8,6 +8,9 @@ import mapboxgl from 'mapbox-gl';
 import type { MapRef } from 'react-map-gl';
 import { createPortal } from 'react-dom';
 import { MAP_CONFIG } from '@/config/constants';
+import { installMapboxFogGuard } from '@/lib/mapboxFogGuard';
+
+installMapboxFogGuard(mapboxgl);
 
 // ── Coordenadas fixas da Usina ────────────────────────────────────────────────
 export const USINA_COORDS = {

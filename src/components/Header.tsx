@@ -2,6 +2,7 @@
 import { Menu, Download, AlertCircle } from 'lucide-react';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import ThemeSelector from './ThemeSelector';
+import OfflineIndicator from './OfflineIndicator';
 
 interface HeaderProps {
   onMenuToggle?: (open: boolean) => void;
@@ -115,8 +116,9 @@ export default function Header({ onMenuToggle }: HeaderProps) {
       />
       </div>
 
-      {/* Ações globais: tema e menu */}
+      {/* Ações globais: indicador offline, tema e menu */}
       <div className="bp-header-actions">
+        <OfflineIndicator />
         <ThemeSelector />
         <button
           type="button"

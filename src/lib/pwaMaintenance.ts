@@ -9,6 +9,8 @@ const PRESERVED_CACHES = new Set([
   'mapas-branco-peres-data',
   'mapbox-tiles',
   'bp-map-tiles-v1',
+  'bp-poi-icons-v1',
+  'bp-config-metadata-v1',
 ]);
 
 const PRESERVED_STORAGE_KEYS = [
@@ -164,3 +166,33 @@ export async function prepareForAppReload(): Promise<void> {
     new Promise<void>((resolve) => window.setTimeout(resolve, 2000)),
   ]);
 }
+
+let mapTilesSwPromise: Promise<ServiceWorkerRegistration | null> | null = null;
+
+/**
+ * Registra o worker dedicado de tiles/dados (/sw-map-tiles.js) quando o worker
+ * principal de produção não está ativo (ex.: preview/dev), sem interferir em
+ * módulos Vite nem no Supabase.
+ */
+export function registerMapTilesServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return Promise.resolve(null);
+  }
+  if (mapTilesSwPromise) return mapTilesSwPromise;
+
+  mapTilesSwPromise = (async () => {
+    await afterFirstRender();
+    const existing = await navigator.serviceWorker.getRegistration();
+    if (existing?.active?.scriptURL?.includes('service-worker.js')) {
+      return existing;
+    }
+    return navigator.serviceWorker.register('/sw-map-tiles.js', { updateViaCache: 'none' });
+  })().catch((error) => {
+    mapTilesSwPromise = null;
+    console.warn('[PWA] Registro de sw-map-tiles ignorado:', error);
+    return null;
+  });
+
+  return mapTilesSwPromise;
+}
+

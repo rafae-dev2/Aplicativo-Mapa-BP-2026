@@ -385,6 +385,301 @@ export async function upsertPois(pois: POI[]): Promise<{ ok: boolean; error: str
   return { ok: true, error: null };
 }
 
+export interface BatchSyncOpInput {
+  opId: string;
+  type: 'insert' | 'update' | 'delete';
+  poi?: POI;
+  updates?: Partial<POI>;
+  id?: string;
+  basePoi?: POI;
+  baseRevision?: number;
+}
+
+export interface SyncBatchPlan {
+  upserts: Array<{ op: BatchSyncOpInput; poi: POI }>;
+  deletes: Array<{ op: BatchSyncOpInput; id: string }>;
+  partialUpdates: BatchSyncOpInput[];
+  revisionCheckIds: string[];
+}
+
+export interface BatchSyncConflict {
+  op: BatchSyncOpInput;
+  remotePoi?: POI;
+  reason: string;
+}
+
+export interface BatchSyncResult {
+  ok: boolean;
+  succeededOpIds: string[];
+  conflicts: BatchSyncConflict[];
+  failedOpIds: string[];
+  requestCount: number;
+  error: string | null;
+}
+
+/**
+ * Agrupa operações pendentes em um plano de lote único (batch) para minimizar
+ * o número de requisições HTTP após a reconexão.
+ */
+export function buildSyncBatchPlan(ops: readonly BatchSyncOpInput[]): SyncBatchPlan {
+  const upserts: Array<{ op: BatchSyncOpInput; poi: POI }> = [];
+  const deletes: Array<{ op: BatchSyncOpInput; id: string }> = [];
+  const partialUpdates: BatchSyncOpInput[] = [];
+  const revisionCheckSet = new Set<string>();
+
+  for (const op of ops) {
+    if (op.type === 'insert' && op.poi) {
+      upserts.push({ op, poi: op.poi });
+    } else if (op.type === 'update') {
+      if (op.poi) {
+        upserts.push({ op, poi: op.poi });
+        if (op.baseRevision !== undefined || op.basePoi?.revision !== undefined) {
+          revisionCheckSet.add(op.poi.id);
+        }
+      } else if (op.id && op.updates) {
+        partialUpdates.push(op);
+        revisionCheckSet.add(op.id);
+      }
+    } else if (op.type === 'delete' && op.id) {
+      deletes.push({ op, id: op.id });
+      if (op.baseRevision !== undefined || op.basePoi?.revision !== undefined) {
+        revisionCheckSet.add(op.id);
+      }
+    }
+  }
+
+  return {
+    upserts,
+    deletes,
+    partialUpdates,
+    revisionCheckIds: Array.from(revisionCheckSet),
+  };
+}
+
+/**
+ * Envia todas as operações pendentes do IndexedDB em lote único para o backend:
+ *  - 1 única consulta `.in('id', ...)` apenas quando existem updates/deletes com
+ *    controle de revisão (0 consultas extras para lotes de inserção);
+ *  - 1 único HTTP POST `.upsert(rows, { onConflict: 'id' })` para todos os
+ *    inserts/updates com payload completo;
+ *  - 1 único HTTP DELETE `.delete().in('id', ids)` para todas as exclusões.
+ */
+async function runSingleQuery<T>(
+  operation: () => PromiseLike<{ data: T | null; error: any }>
+): Promise<{ data: T | null; error: any }> {
+  try {
+    const result = await operation();
+    return { data: result.data ?? null, error: result.error ?? null };
+  } catch (error: any) {
+    return {
+      data: null,
+      error: error instanceof Error ? error : new Error(String(error || 'Falha de rede no lote')),
+    };
+  }
+}
+
+export async function syncPendingOpsBatch(ops: readonly BatchSyncOpInput[]): Promise<BatchSyncResult> {
+  if (!SUPABASE_ENABLED) {
+    return {
+      ok: false,
+      succeededOpIds: [],
+      conflicts: [],
+      failedOpIds: ops.map((op) => op.opId),
+      requestCount: 0,
+      error: 'Supabase nao configurado',
+    };
+  }
+  if (ops.length === 0) {
+    return { ok: true, succeededOpIds: [], conflicts: [], failedOpIds: [], requestCount: 0, error: null };
+  }
+
+  const plan = buildSyncBatchPlan(ops);
+  const succeededOpIds: string[] = [];
+  const conflicts: BatchSyncConflict[] = [];
+  const failedOpIds: string[] = [];
+  let requestCount = 0;
+
+  // 1. Pré-checagem única em lote (somente quando há updates/deletes com revisão)
+  const remoteById = new Map<string, POI>();
+  if (plan.revisionCheckIds.length > 0) {
+    requestCount += 1;
+    const { data, error } = await runSingleQuery<RemotePoiRow[]>(() =>
+      supabase
+        .from(POIS_TABLE)
+        .select('*')
+        .in('id', plan.revisionCheckIds)
+    );
+    if (error) {
+      return {
+        ok: false,
+        succeededOpIds: [],
+        conflicts: [],
+        failedOpIds: ops.map((op) => op.opId),
+        requestCount,
+        error: error.message,
+      };
+    }
+    (data || []).forEach((row) => {
+      const poi = mapRowToPoi(row);
+      remoteById.set(poi.id, poi);
+    });
+  }
+
+  // 2. Filtra conflitos de revisão e prepara linhas do lote único de upsert
+  const upsertBatchItems: Array<{ op: BatchSyncOpInput; poi: POI }> = [];
+  for (const item of plan.upserts) {
+    if (item.op.type === 'update') {
+      const remote = remoteById.get(item.poi.id);
+      const expectedRevision = item.op.baseRevision ?? item.op.basePoi?.revision;
+      if (remote && expectedRevision !== undefined && remote.revision !== expectedRevision) {
+        conflicts.push({
+          op: item.op,
+          remotePoi: remote,
+          reason: 'A revisão remota mudou antes da atualização em lote.',
+        });
+        continue;
+      }
+      const nextRevision = remote ? (remote.revision || 1) + 1 : Math.max(2, item.poi.revision || 1);
+      upsertBatchItems.push({
+        op: item.op,
+        poi: {
+          ...item.poi,
+          revision: nextRevision,
+          updatedAt: Date.now(),
+          updatedBy: getDeviceId(),
+        },
+      });
+    } else {
+      upsertBatchItems.push(item);
+    }
+  }
+
+  // Também incorpora partialUpdates que encontraram o POI remoto na pré-checagem única
+  for (const partial of plan.partialUpdates) {
+    const id = partial.id!;
+    const remote = remoteById.get(id);
+    if (!remote) {
+      failedOpIds.push(partial.opId);
+      continue;
+    }
+    const expectedRevision = partial.baseRevision ?? partial.basePoi?.revision;
+    if (expectedRevision !== undefined && remote.revision !== expectedRevision) {
+      conflicts.push({
+        op: partial,
+        remotePoi: remote,
+        reason: 'A revisão remota mudou antes da atualização parcial em lote.',
+      });
+      continue;
+    }
+    upsertBatchItems.push({
+      op: partial,
+      poi: {
+        ...remote,
+        ...(partial.updates || {}),
+        id,
+        revision: (remote.revision || 1) + 1,
+        updatedAt: Date.now(),
+        updatedBy: getDeviceId(),
+      },
+    });
+  }
+
+  // 3. Executa UM ÚNICO POST em lote para todos os inserts + updates
+  if (upsertBatchItems.length > 0) {
+    requestCount += 1;
+    const rows = upsertBatchItems.map((item) => mapPoiToRow(item.poi));
+    let upsertResult = await runSingleQuery<RemotePoiRow[]>(() =>
+      supabase
+        .from(POIS_TABLE)
+        .upsert(rows, { onConflict: 'id' })
+        .select('*')
+    );
+
+    if (upsertResult.error && isMissingTransportFormulaColumn(upsertResult.error)) {
+      requestCount += 1;
+      const legacyRows = upsertBatchItems.map((item) => mapPoiToLegacyRow(item.poi));
+      upsertResult = await runSingleQuery<RemotePoiRow[]>(() =>
+        supabase
+          .from(POIS_TABLE)
+          .upsert(legacyRows, { onConflict: 'id' })
+          .select('*')
+      );
+    }
+
+    if (upsertResult.error) {
+      console.warn('[poiService] syncPendingOpsBatch upsert erro:', upsertResult.error.message);
+      upsertBatchItems.forEach((item) => failedOpIds.push(item.op.opId));
+      return {
+        ok: false,
+        succeededOpIds,
+        conflicts,
+        failedOpIds: [...failedOpIds, ...plan.deletes.map((d) => d.op.opId)],
+        requestCount,
+        error: upsertResult.error.message,
+      };
+    }
+
+    upsertBatchItems.forEach((item) => succeededOpIds.push(item.op.opId));
+  }
+
+  // 4. Executa UM ÚNICO DELETE em lote para todas as exclusões não-conflitantes
+  const deleteBatchItems: Array<{ op: BatchSyncOpInput; id: string }> = [];
+  for (const item of plan.deletes) {
+    const remote = remoteById.get(item.id);
+    if (!remote && plan.revisionCheckIds.includes(item.id)) {
+      // Já removido no servidor -> idempotente
+      succeededOpIds.push(item.op.opId);
+      continue;
+    }
+    const expectedRevision = item.op.baseRevision ?? item.op.basePoi?.revision;
+    if (remote && expectedRevision !== undefined && remote.revision !== expectedRevision) {
+      conflicts.push({
+        op: item.op,
+        remotePoi: remote,
+        reason: 'A revisão remota mudou antes da exclusão em lote.',
+      });
+      continue;
+    }
+    deleteBatchItems.push(item);
+  }
+
+  if (deleteBatchItems.length > 0) {
+    requestCount += 1;
+    const deleteIds = deleteBatchItems.map((item) => item.id);
+    const { error } = await runSingleQuery<Array<{ id: string }>>(() =>
+      supabase
+        .from(POIS_TABLE)
+        .delete()
+        .in('id', deleteIds)
+        .select('id')
+    );
+
+    if (error) {
+      console.warn('[poiService] syncPendingOpsBatch delete erro:', error.message);
+      deleteBatchItems.forEach((item) => failedOpIds.push(item.op.opId));
+      return {
+        ok: false,
+        succeededOpIds,
+        conflicts,
+        failedOpIds,
+        requestCount,
+        error: error.message,
+      };
+    }
+
+    deleteBatchItems.forEach((item) => succeededOpIds.push(item.op.opId));
+  }
+
+  return {
+    ok: failedOpIds.length === 0 && conflicts.length === 0,
+    succeededOpIds,
+    conflicts,
+    failedOpIds,
+    requestCount,
+    error: failedOpIds.length > 0 ? 'Falha parcial no lote' : null,
+  };
+}
+
 /** Remove uma ocorrencia do banco. */
 export async function deletePoiById(id: string, baseRevision?: number, localPoi?: POI): Promise<PoiWriteResult> {
   if (!SUPABASE_ENABLED) return { ok: false, error: 'Supabase nao configurado' };

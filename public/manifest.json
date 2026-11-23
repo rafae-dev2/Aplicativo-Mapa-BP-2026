@@ -1,8 +1,10 @@
 {
+  "id": "/",
   "name": "Mapas Branco Peres",
-  "short_name": "Mapas Branco Peres",
+  "short_name": "Mapas BP",
   "description": "Sistema Agrícola Avançado: mapas, fazendas, talhões e planejamento operacional Branco Peres",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0A101A",
   "theme_color": "#0A101A",

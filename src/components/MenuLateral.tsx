@@ -12,6 +12,7 @@
 
 import { lazy, Suspense, useState } from 'react';
 import { X, ChevronRight, Minimize2, ExternalLink, Maximize2 } from 'lucide-react';
+import OfflineLayersStatusPanel from './OfflineLayersStatusPanel';
 
 // O módulo só é necessário após a escolha explícita no menu.
 const ExperimentosModal = lazy(() => import('./ExperimentosModal'));
@@ -411,20 +412,25 @@ export default function MenuLateral({ isOpen, onClose, onNavigateToTalhao }: Men
             </button>
           </div>
 
-          {/* Label seção */}
-          <div className="bp-menu-section-label" style={{
-            padding: '12px 16px 6px',
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-            color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase',
-          }}>
-            Módulos
-          </div>
+          {/* Corpo rolável: status de camadas offline + módulos */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <OfflineLayersStatusPanel isOpen={isOpen} />
 
-          {/* Lista de itens */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 20px' }}>
-            {menuItems.map((item, idx) => (
-              <MenuItemCard key={item.id} item={item} isFirst={idx === 0} />
-            ))}
+            {/* Label seção */}
+            <div className="bp-menu-section-label" style={{
+              padding: '12px 16px 6px',
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase',
+            }}>
+              Módulos
+            </div>
+
+            {/* Lista de itens */}
+            <div style={{ padding: '0 10px 20px' }}>
+              {menuItems.map((item, idx) => (
+                <MenuItemCard key={item.id} item={item} isFirst={idx === 0} />
+              ))}
+            </div>
           </div>
 
           {/* Footer */}

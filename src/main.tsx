@@ -1,7 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { Component, lazy, Suspense, type ReactNode } from 'react';
 import './index.css';
-import { runPwaMaintenance } from './lib/pwaMaintenance';
+import { runPwaMaintenance, registerMapTilesServiceWorker } from './lib/pwaMaintenance';
+import { warmStrategicPoiIconsCache } from './lib/poiIconCache';
+import { warmConfigMetadataCache } from './lib/configMetadataCache';
 import LoadingSpinner from './components/LoadingSpinner';
 
 const App = lazy(() => import('./App'));
@@ -28,10 +30,16 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // O shell aparece antes de qualquer manutenção. Também funciona se load já ocorreu.
-if (import.meta.env.PROD) {
-  const maintain = () => {
-    window.setTimeout(() => { void runPwaMaintenance('189'); }, 1500);
-  };
-  if (document.readyState === 'complete') maintain();
-  else window.addEventListener('load', maintain, { once: true });
-}
+const scheduleOfflineSw = () => {
+  window.setTimeout(() => {
+    if (import.meta.env.PROD) {
+      void runPwaMaintenance('189');
+    } else {
+      void registerMapTilesServiceWorker();
+    }
+    void warmStrategicPoiIconsCache();
+    void warmConfigMetadataCache();
+  }, 1500);
+};
+if (document.readyState === 'complete') scheduleOfflineSw();
+else window.addEventListener('load', scheduleOfflineSw, { once: true });

@@ -116,11 +116,60 @@ const CACHE_VERSION   = 'v189-selecao-consistente';
 const STATIC_CACHE    = 'mapas-branco-peres-static'; // shell (index.html) + bundles JS/CSS + ícones
 const DATA_CACHE      = 'mapas-branco-peres-data';   // dados de campo (.mapdata, .mbtiles, labels)
 const TILES_CACHE     = 'mapbox-tiles';              // tiles/estilo/fontes do Mapbox
+const POI_ICONS_CACHE = 'bp-poi-icons-v1';           // cache dinâmico estratégico de ícones de caminhões e represas
+const POI_ICONS_MANIFEST_KEY = '/__poi-icons-manifest-meta__';
+const STRATEGIC_POI_ICONS_VERSION = '2026-01';
+const CONFIG_METADATA_CACHE = 'bp-config-metadata-v1'; // cache-first estrito para configuração e metadados offline
+const CONFIG_METADATA_MANIFEST_KEY = '/__config-metadata-manifest__';
+const CONFIG_METADATA_VERSION = '2026-01';
 // O worker dedicado de tiles usa este nome. Ele é relacionado ao app e nunca
 // deve ser removido por este worker, assim como caches que não conhecemos.
-const RELATED_CACHES  = [STATIC_CACHE, DATA_CACHE, TILES_CACHE, 'bp-map-tiles-v1'];
+const RELATED_CACHES  = [
+  STATIC_CACHE,
+  DATA_CACHE,
+  TILES_CACHE,
+  POI_ICONS_CACHE,
+  CONFIG_METADATA_CACHE,
+  'bp-map-tiles-v1',
+];
 const STAGING_PREFIX  = `${STATIC_CACHE}::staging:`;
 const CACHE_NAME      = STATIC_CACHE; // compatibilidade com trechos existentes
+
+// Campo dedicado aos ícones estratégicos de caminhões e represas (pegadores de água)
+const STRATEGIC_POI_ICONS = [
+  '/poi-water-truck-blue.png',
+  '/poi-water-truck-x.png',
+  '/poi-water-truck-transparent.png',
+  '/poi-water-truck-unavailable.png',
+  '/poi-pin-transport-dump-truck.png',
+  '/poi-pin-transport-dump-truck-256.png',
+  '/poi-pin-transport-munck-truck.png',
+  '/poi-pin-fire.png',
+  '/poi-pin-custom.png',
+];
+
+const STRATEGIC_POI_ICON_PATTERN =
+  /^\/poi-(?:water-truck|pin-transport|pin-fire|pin-custom)[^/]*\.(?:png|webp|svg)$/i;
+
+// Lista oficial de arquivos de configuração e metadados servidos com Cache-First estrito
+const CONFIG_AND_METADATA_ASSETS = [
+  '/manifest.json',
+  '/runtime-config.js',
+  '/notification-config.js',
+  '/version.json',
+  '/planning_data.json',
+  '/planejamento_colheita.json',
+  '/experimentos_2026.json',
+];
+
+const CONFIG_METADATA_EXACT_SET = new Set([
+  ...CONFIG_AND_METADATA_ASSETS,
+  '/app-shell-assets.json',
+  '/pwa-icon-generation-report.json',
+]);
+
+const CONFIG_METADATA_PATTERN =
+  /^\/(?:(?:runtime|notification|app)-config\.js|manifest(?:-[^/]+)?\.json|version\.json|app-shell-assets\.json|(?:planning_data|planejamento_colheita|experimentos_\d+)\.json)$/i;
 
 const IDB_NAME        = 'mapas-geojson-db';
 const IDB_STORE       = 'geojson-store';
@@ -501,6 +550,280 @@ async function precacheEssentialData(dataAssets) {
   }));
 }
 
+function computeIconListSignature(icons, version) {
+  const canonical = Array.from(new Set(icons)).sort((a, b) => a.localeCompare(b));
+  return `${version}::${canonical.join('|')}`;
+}
+
+function isStrategicPoiIcon(url) {
+  if (url.origin !== self.location.origin) return false;
+  return (
+    STRATEGIC_POI_ICONS.includes(url.pathname) ||
+    STRATEGIC_POI_ICON_PATTERN.test(url.pathname)
+  );
+}
+
+async function readIconManifest(cache) {
+  try {
+    const res = await cache.match(POI_ICONS_MANIFEST_KEY);
+    if (!res) return null;
+    const data = await res.json();
+    if (!data || typeof data.signature !== 'string' || !Array.isArray(data.icons)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function writeIconManifest(cache, manifest) {
+  try {
+    await cache.put(
+      POI_ICONS_MANIFEST_KEY,
+      new Response(JSON.stringify(manifest), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  } catch {
+    /* noop */
+  }
+}
+
+async function precacheStrategicPoiIcons(
+  iconList = STRATEGIC_POI_ICONS,
+  version = STRATEGIC_POI_ICONS_VERSION
+) {
+  const cache = await caches.open(POI_ICONS_CACHE);
+  const urls = Array.isArray(iconList) && iconList.length ? iconList : STRATEGIC_POI_ICONS;
+  const targetVersion = typeof version === 'string' && version ? version : STRATEGIC_POI_ICONS_VERSION;
+  const targetSignature = computeIconListSignature(urls, targetVersion);
+  const stored = await readIconManifest(cache);
+
+  const presence = await Promise.all(
+    urls.map(async (iconPath) => ({
+      iconPath,
+      present: Boolean(await cache.match(iconPath)),
+    }))
+  );
+  const missing = presence.filter((item) => !item.present).map((item) => item.iconPath);
+
+  // Zero requisições de rede se a lista oficial não mudou e todos os ícones já estão cacheados
+  if (stored && stored.signature === targetSignature && missing.length === 0) {
+    return { updated: false, fetched: 0, removed: 0, count: urls.length, signature: targetSignature };
+  }
+
+  const prevIcons = stored && Array.isArray(stored.icons) ? stored.icons : [];
+  const nextSet = new Set(urls);
+  const prevSet = new Set(prevIcons);
+  const removedIcons = prevIcons.filter((icon) => !nextSet.has(icon));
+  const addedIcons = urls.filter((icon) => !prevSet.has(icon));
+  const versionChanged = Boolean(stored && stored.version !== targetVersion);
+  const toFetch = versionChanged ? urls : Array.from(new Set([...addedIcons, ...missing]));
+
+  let removed = 0;
+  for (const obsolete of removedIcons) {
+    if (await cache.delete(obsolete)) removed += 1;
+  }
+
+  let fetched = 0;
+  await Promise.allSettled(toFetch.map(async (iconPath) => {
+    try {
+      const response = await fetchInstallAsset(iconPath, versionChanged ? 'no-cache' : 'force-cache', 15000);
+      await safeCachePut(cache, iconPath, response);
+      fetched += 1;
+    } catch (error) {
+      console.warn(`[SW ${CACHE_VERSION}] Pré-cache de ícone POI falhou (${iconPath}):`, error);
+    }
+  }));
+
+  const remainingMissing = (
+    await Promise.all(urls.map((iconPath) => cache.match(iconPath)))
+  ).filter((match) => !match).length;
+
+  if (remainingMissing === 0) {
+    await writeIconManifest(cache, {
+      signature: targetSignature,
+      version: targetVersion,
+      icons: urls,
+      updatedAt: Date.now(),
+    });
+  }
+
+  return {
+    updated: fetched > 0 || removed > 0,
+    fetched,
+    removed,
+    count: urls.length - remainingMissing,
+    signature: targetSignature,
+  };
+}
+
+// Cache-First estrito: elimina tráfego móvel desnecessário de revalidação por acesso.
+async function handleStrategicPoiIcon(request, url) {
+  const cache = await caches.open(POI_ICONS_CACHE);
+  const iconKey = url.pathname;
+  const cached = (await cache.match(iconKey)) || (await cache.match(request));
+  if (cached) return cached;
+
+  try {
+    const response = await withTimeout(fetch(request, { cache: 'force-cache' }), NAVIGATION_TIMEOUT, 'poi-icon');
+    if (isUsableResponse(response)) {
+      await safeCachePut(cache, iconKey, response);
+    }
+    return response;
+  } catch {
+    return new Response('', { status: 504, statusText: 'offline-uncached-poi-icon' });
+  }
+}
+
+function isConfigOrMetadataRequest(url) {
+  if (url.origin !== self.location.origin) return false;
+  return (
+    CONFIG_METADATA_EXACT_SET.has(url.pathname) ||
+    CONFIG_METADATA_PATTERN.test(url.pathname)
+  );
+}
+
+async function readConfigMetadataManifest(cache) {
+  try {
+    const res = await cache.match(CONFIG_METADATA_MANIFEST_KEY);
+    if (!res) return null;
+    const data = await res.json();
+    if (!data || typeof data.signature !== 'string' || !Array.isArray(data.assets)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function writeConfigMetadataManifest(cache, manifest) {
+  try {
+    await cache.put(
+      CONFIG_METADATA_MANIFEST_KEY,
+      new Response(JSON.stringify(manifest), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  } catch {
+    /* noop */
+  }
+}
+
+async function precacheConfigMetadata(
+  assetList = CONFIG_AND_METADATA_ASSETS,
+  version = CONFIG_METADATA_VERSION
+) {
+  const cache = await caches.open(CONFIG_METADATA_CACHE);
+  const urls = Array.isArray(assetList) && assetList.length ? assetList : CONFIG_AND_METADATA_ASSETS;
+  const targetVersion = typeof version === 'string' && version ? version : CONFIG_METADATA_VERSION;
+  const targetSignature = computeIconListSignature(urls, targetVersion);
+  const stored = await readConfigMetadataManifest(cache);
+
+  const presence = await Promise.all(
+    urls.map(async (assetPath) => ({
+      assetPath,
+      present: Boolean(await cache.match(assetPath)),
+    }))
+  );
+  const missing = presence.filter((item) => !item.present).map((item) => item.assetPath);
+
+  if (stored && stored.signature === targetSignature && missing.length === 0) {
+    return { updated: false, fetched: 0, removed: 0, count: urls.length, signature: targetSignature };
+  }
+
+  const prevAssets = stored && Array.isArray(stored.assets) ? stored.assets : [];
+  const nextSet = new Set(urls);
+  const prevSet = new Set(prevAssets);
+  const removedAssets = prevAssets.filter((asset) => !nextSet.has(asset));
+  const addedAssets = urls.filter((asset) => !prevSet.has(asset));
+  const versionChanged = Boolean(stored && stored.version !== targetVersion);
+  const toFetch = versionChanged ? urls : Array.from(new Set([...addedAssets, ...missing]));
+
+  let removed = 0;
+  for (const obsolete of removedAssets) {
+    if (await cache.delete(obsolete)) removed += 1;
+  }
+
+  let fetched = 0;
+  await Promise.allSettled(toFetch.map(async (assetPath) => {
+    try {
+      const response = await fetchInstallAsset(assetPath, versionChanged ? 'no-cache' : 'force-cache', 15000);
+      await safeCachePut(cache, assetPath, response);
+      fetched += 1;
+    } catch (error) {
+      console.warn(`[SW ${CACHE_VERSION}] Pré-cache de configuração/metadados falhou (${assetPath}):`, error);
+    }
+  }));
+
+  const remainingMissing = (
+    await Promise.all(urls.map((assetPath) => cache.match(assetPath)))
+  ).filter((match) => !match).length;
+
+  if (remainingMissing === 0) {
+    await writeConfigMetadataManifest(cache, {
+      signature: targetSignature,
+      version: targetVersion,
+      assets: urls,
+      updatedAt: Date.now(),
+    });
+  }
+
+  return {
+    updated: fetched > 0 || removed > 0,
+    fetched,
+    removed,
+    count: urls.length - remainingMissing,
+    signature: targetSignature,
+  };
+}
+
+/**
+ * Cache-First estrito para arquivos de configuração e metadados.
+ * Minimiza chamadas de rede ao iniciar o app em modo offline (inclusive quando
+ * a URL tem query de versão como `/runtime-config.js?v=189`).
+ */
+async function handleConfigMetadata(request, url) {
+  const cache = await caches.open(CONFIG_METADATA_CACHE);
+  const canonicalKey = url.pathname;
+  const forceNetwork =
+    url.searchParams.get('forceNetwork') === '1' ||
+    request.headers.get('X-BP-Force-Refresh') === '1';
+
+  if (forceNetwork) {
+    try {
+      const response = await withTimeout(fetch(request, { cache: 'no-store' }), NAVIGATION_TIMEOUT, 'config-metadata-refresh');
+      if (isUsableResponse(response)) {
+        await safeCachePut(cache, canonicalKey, response);
+      }
+      return response;
+    } catch {
+      const fallback = (await cache.match(canonicalKey)) || (await cache.match(request));
+      if (fallback) return fallback;
+      const staticFallback = await caches.open(STATIC_CACHE).then((c) => c.match(canonicalKey) || c.match(request));
+      if (staticFallback) return staticFallback;
+      return new Response('', { status: 504, statusText: 'offline-uncached-config' });
+    }
+  }
+
+  const cached = (await cache.match(canonicalKey)) || (await cache.match(request));
+  if (cached) return cached;
+
+  const staticFallback = await caches.open(STATIC_CACHE).then((c) => c.match(canonicalKey) || c.match(request));
+  if (staticFallback) {
+    await safeCachePut(cache, canonicalKey, staticFallback);
+    return staticFallback;
+  }
+
+  try {
+    const response = await withTimeout(fetch(request, { cache: 'force-cache' }), NAVIGATION_TIMEOUT, 'config-metadata');
+    if (isUsableResponse(response)) {
+      await safeCachePut(cache, canonicalKey, response);
+    }
+    return response;
+  } catch {
+    return new Response('', { status: 504, statusText: 'offline-uncached-config' });
+  }
+}
+
 // A limpeza é deliberadamente explícita: não enumera nem remove tiles por
 // requisição. A interface permanece para compatibilidade com o app.
 async function cleanupExpiredTiles() {
@@ -535,7 +858,9 @@ self.addEventListener('install', (event) => {
         // Só depois de validar/promover o shell tente o dado essencial. MBTiles
         // não entram no manifesto de pré-cache e não são baixados aqui.
         await precacheEssentialData(dataAssets);
-        console.log(`[SW ${CACHE_VERSION}] Shell, bundles e dados essenciais preparados.`);
+        await precacheStrategicPoiIcons();
+        await precacheConfigMetadata();
+        console.log(`[SW ${CACHE_VERSION}] Shell, bundles, ícones POI, configuração/metadados e dados essenciais preparados.`);
       } catch (err) {
         console.warn(`[SW ${CACHE_VERSION}] Instalação staged não concluída; shell atual preservado:`, err);
         throw err;
@@ -644,6 +969,28 @@ self.addEventListener('message', async (event) => {
       }
     })());
   }
+
+  if (type === 'CACHE_POI_ICONS') {
+    event.waitUntil((async () => {
+      try {
+        const result = await precacheStrategicPoiIcons(event.data?.icons, event.data?.version);
+        event.source?.postMessage({ type: 'POI_ICONS_CACHED', ...result });
+      } catch (error) {
+        console.warn(`[SW ${CACHE_VERSION}] Falha ao cachear ícones POI:`, error);
+      }
+    })());
+  }
+
+  if (type === 'CACHE_CONFIG_METADATA') {
+    event.waitUntil((async () => {
+      try {
+        const result = await precacheConfigMetadata(event.data?.assets, event.data?.version);
+        event.source?.postMessage({ type: 'CONFIG_METADATA_CACHED', ...result });
+      } catch (error) {
+        console.warn(`[SW ${CACHE_VERSION}] Falha ao cachear configuração/metadados:`, error);
+      }
+    })());
+  }
 });
 
 // ── Handlers de fetch ─────────────────────────────────────────────────────────
@@ -682,26 +1029,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // runtime-config.js é cached-first: a URL versionada do index nunca deve
-  // atrasar a abertura enquanto a rede decide se responde.
-  if (url.pathname.endsWith('/runtime-config.js')) {
-    event.respondWith(handleRuntimeConfig(event.request, event));
-    return;
-  }
-
-  // version.json continua Network First para CHECK_UPDATE, com fallback local.
-  if (url.pathname.endsWith('/version.json')) {
-    event.respondWith(
-      fetch(event.request, { cache: 'no-store' })
-        .then((response) => {
-          if (response && response.ok) {
-            const cachePromise = caches.open(STATIC_CACHE).then((cache) => safeCachePut(cache, event.request, response));
-            event.waitUntil(cachePromise);
-          }
-          return response;
-        })
-        .catch(() => caches.open(STATIC_CACHE).then((cache) => cache.match(event.request)))
-    );
+  // Arquivos de configuração e metadados (manifest.json, runtime-config.js,
+  // notification-config.js, version.json, planning_data.json, etc.) →
+  // estratégia Cache-First estrita para minimizar chamadas de rede na
+  // inicialização offline. Atualização forçada disponível via ?forceNetwork=1
+  // ou header X-BP-Force-Refresh: 1.
+  if (isConfigOrMetadataRequest(url)) {
+    event.respondWith(handleConfigMetadata(event.request, url));
     return;
   }
 
@@ -719,6 +1053,12 @@ self.addEventListener('fetch', (event) => {
     || url.pathname.endsWith('-labels.json')
   ) {
     event.respondWith(handleDataAsset(event.request));
+    return;
+  }
+
+  // Ícones estratégicos de caminhões e represas → Cache-First estrito controlado por assinatura oficial
+  if (isStrategicPoiIcon(url)) {
+    event.respondWith(handleStrategicPoiIcon(event.request, url));
     return;
   }
 
@@ -744,34 +1084,6 @@ self.addEventListener('fetch', (event) => {
   // App Shell → Cache First
   event.respondWith(handleAppShell(event.request));
 });
-
-async function handleRuntimeConfig(request, event) {
-  const cache = await caches.open(STATIC_CACHE);
-  const cached = (await cache.match(request)) || (await cache.match('/runtime-config.js'));
-  if (cached) {
-    event.waitUntil((async () => {
-      try {
-        const response = await fetch(request, { cache: 'no-store' });
-        if (isUsableResponse(response)) {
-          await safeCachePut(cache, '/runtime-config.js', response);
-          await safeCachePut(cache, request, response);
-        }
-      } catch { /* cache atual continua válido */ }
-    })());
-    return cached;
-  }
-
-  try {
-    const response = await withTimeout(fetch(request, { cache: 'force-cache' }), NAVIGATION_TIMEOUT, 'runtime-config');
-    if (isUsableResponse(response)) {
-      await safeCachePut(cache, '/runtime-config.js', response);
-      await safeCachePut(cache, request, response);
-    }
-    return response;
-  } catch {
-    return new Response('', { status: 504, statusText: 'offline-uncached-runtime-config' });
-  }
-}
 
 // Cache-first para dados de campo versionados. A query string faz parte da
 // identidade: nunca sirva mapdata v185 para uma solicitação v186.

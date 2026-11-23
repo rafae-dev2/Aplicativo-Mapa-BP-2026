@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Trash2, MapPin, Plus, Search, X, ChevronDown, ChevronUp, Navigation, Camera, Image as ImageIcon, Loader2, Wifi, WifiOff, AlertTriangle, RotateCcw, Bell, BellOff, Check } from 'lucide-react';
+import { Trash2, MapPin, Plus, Search, X, ChevronLeft, ChevronRight, Navigation, Camera, Image as ImageIcon, Loader2, Wifi, WifiOff, AlertTriangle, RotateCcw, Bell, BellOff, Check } from 'lucide-react';
 import { SUPABASE_ENABLED } from '@/lib/supabaseClient';
 import {
   fetchAllPois,
@@ -22,8 +22,12 @@ import {
 import {
   enqueue as enqueueOp,
   flushQueue,
+  initOfflineQueue,
+  loadPoisSnapshotIDB,
   pendingCount as getPendingCount,
   mergeRemoteWithPending,
+  savePoisSnapshotIDB,
+  subscribeOfflineQueue,
 } from '@/lib/offlineQueue';
 import { compressImage, estimateDataUrlBytes, formatBytes } from '@/lib/imageCompression';
 import { archiveConflict, loadConflicts, mergeConflictVersions, removeConflict, upsertConflict } from '@/lib/conflictStore';
@@ -31,6 +35,9 @@ import { enableCriticalNotifications, getNotificationPermission, isCriticalCateg
 import type { POIConflict, ConflictResolution } from '@/lib/conflictStore';
 import { PoiCategoryIcon } from './PoiMarkerIcon';
 import { formatTonsInput, parseTons } from '@/lib/transportFormat';
+import { mapPerformanceMonitor } from '@/lib/mapPerformanceMonitor';
+import { poiReconnectProfiler } from '@/lib/poiReconnectProfiler';
+import { networkQualityMonitor } from '@/lib/networkQualityMonitor';
 
 export interface POI {
   id: string;
@@ -185,6 +192,7 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
   // sync já está rodando, marcamos para rodar mais uma vez ao final (coalesce).
   const syncingRef = useRef(false);
   const resyncQueuedRef = useRef(false);
+  const initialFetchPerfMeasuredRef = useRef(false);
 
   // Tombstones (lápides) de exclusão: guarda os ids recém-excluídos por um curto
   // período. Serve para ignorar eventos de realtime atrasados (INSERT/UPDATE que
@@ -271,24 +279,60 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
     });
   }, [filterTombstoned, hasRecentLocalMutation, isTombstoned]);
 
-  // Cache local (offline) — carrega imediatamente para uso sem internet
+  // Cache local + fila IndexedDB — hidrata imediatamente para uso sem internet
   useEffect(() => {
+    let active = true;
+    mapPerformanceMonitor.startPhase('poi-initial-hydrate');
     const saved = localStorage.getItem('mapas-pois');
+    let initialLocal: POI[] = [];
     if (saved) {
-      try { setPoisState(mergeRemoteWithPending(JSON.parse(saved))); }
-      catch (e) { console.error('Erro ao carregar POIs locais:', e); }
+      try {
+        initialLocal = JSON.parse(saved);
+        setPoisState(mergeRemoteWithPending(initialLocal));
+      } catch (e) {
+        console.error('Erro ao carregar POIs locais:', e);
+      }
     }
+
+    const unsubscribeQueue = subscribeOfflineQueue((ops) => {
+      if (!active) return;
+      setPendingCount(ops.length);
+    });
+
+    void Promise.all([initOfflineQueue(), loadPoisSnapshotIDB()]).then(([ops, idbSnapshot]) => {
+      if (!active) return;
+      setPendingCount(ops.length);
+      const base = idbSnapshot && idbSnapshot.length > 0 ? idbSnapshot : initialLocal;
+      setPoisState((prev) => {
+        const seed = prev.length > 0 ? prev : base;
+        return mergeRemoteWithPending(seed);
+      });
+      mapPerformanceMonitor.endPhase('poi-initial-hydrate', {
+        localStorageCount: initialLocal.length,
+        indexedDbSnapshotCount: idbSnapshot?.length ?? 0,
+        pendingOps: ops.length,
+      });
+    });
+
+    return () => {
+      active = false;
+      unsubscribeQueue();
+    };
   }, []);
 
-  // Persistir cache local (fonte offline)
+  // Persistir cache local (localStorage + IndexedDB para suportar fotos offline)
   useEffect(() => {
     try { localStorage.setItem('mapas-pois', JSON.stringify(pois)); } catch { /* quota */ }
+    if (pois.length > 0) {
+      void savePoisSnapshotIDB(pois);
+    }
   }, [pois]);
 
-  // Sincroniza: (1) envia a fila offline, (2) recarrega do banco (fonte da verdade),
+  // Sincroniza: (1) hidrata e envia a fila IndexedDB, (2) recarrega do banco (fonte da verdade),
   // (3) mescla com pendencias que ainda nao subiram. Chamado no load, ao reconectar,
   // apos cada mutacao e periodicamente enquanto houver pendencias.
-  const syncNow = useCallback(async () => {
+  const syncNow = useCallback(async (options?: { ignoreLatencyPause?: boolean }) => {
+    await initOfflineQueue();
     if (!SUPABASE_ENABLED) { setSyncMode('offline'); return; }
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setSyncMode('offline');
@@ -303,9 +347,37 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
     syncingRef.current = true;
     setSyncMode('syncing');
     try {
+      let measureReconnectThisRun =
+        mapPerformanceMonitor.isReconnectCycleActive() || poiReconnectProfiler.isActive();
+      let ignoreLatencyPauseThisRun = Boolean(options?.ignoreLatencyPause);
       do {
         resyncQueuedRef.current = false;
-        const flushResult = await flushQueue();
+        const isReconnect = measureReconnectThisRun;
+        if (isReconnect) {
+          // Apenas a primeira passagem pós-reconexão mede o ciclo de reconexão;
+          // repasses coalescidos não sobrescrevem o tempo real do lote (batch).
+          measureReconnectThisRun = false;
+        }
+
+        if (isReconnect) {
+          mapPerformanceMonitor.startPhase('reconnect-queue-batch-flush');
+          poiReconnectProfiler.markStageStart('batch-flush');
+        }
+        const flushResult = await flushQueue({ ignoreLatencyPause: ignoreLatencyPauseThisRun });
+        ignoreLatencyPauseThisRun = false;
+        if (isReconnect) {
+          const flushMeta = {
+            flushed: flushResult.flushed,
+            remaining: flushResult.remaining,
+            requestCount: flushResult.requestCount ?? 0,
+            attempts: flushResult.attempts ?? 1,
+            batchMode: Boolean(flushResult.batchMode),
+            pausedForLatency: Boolean(flushResult.pausedForLatency),
+          };
+          mapPerformanceMonitor.endPhase('reconnect-queue-batch-flush', flushMeta);
+          poiReconnectProfiler.markStageEnd('batch-flush', flushMeta);
+        }
+
         setConflicts(loadConflicts());
         const flushSucceeded = flushResult.ok || flushResult.reason === 'busy' || flushResult.reason === 'conflict';
         if (!flushResult.ok && flushResult.reason !== 'busy') {
@@ -314,8 +386,42 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
           console.warn('[POIManager] Fila mantida para nova tentativa:', flushResult.reason);
           setSyncMode('offline');
         }
+
+        const shouldMeasureInitialFetch = !isReconnect && !initialFetchPerfMeasuredRef.current;
+        if (isReconnect) {
+          mapPerformanceMonitor.startPhase('reconnect-poi-fetch');
+          poiReconnectProfiler.markStageStart('poi-fetch');
+        } else if (shouldMeasureInitialFetch) {
+          mapPerformanceMonitor.startPhase('poi-initial-fetch');
+        }
+
         const { pois: remote, error } = await fetchAllPois();
+
+        if (isReconnect) {
+          const fetchMeta = {
+            poiCount: remote.length,
+            error: error ?? null,
+          };
+          mapPerformanceMonitor.endPhase('reconnect-poi-fetch', fetchMeta);
+          poiReconnectProfiler.markStageEnd('poi-fetch', fetchMeta);
+        } else if (shouldMeasureInitialFetch) {
+          initialFetchPerfMeasuredRef.current = true;
+          mapPerformanceMonitor.endPhase('poi-initial-fetch', {
+            poiCount: remote.length,
+            error: error ?? null,
+          });
+        }
+
+        if (isReconnect) {
+          poiReconnectProfiler.markStageStart('conflicts-fetch');
+        }
         const remoteConflicts = await fetchOpenRemoteConflicts();
+        if (isReconnect) {
+          poiReconnectProfiler.markStageEnd('conflicts-fetch', {
+            count: remoteConflicts.conflicts.length,
+            error: remoteConflicts.error ?? null,
+          });
+        }
         if (!remoteConflicts.error) {
           remoteConflicts.conflicts.forEach((conflict) => upsertConflict(conflict));
           setConflicts(loadConflicts());
@@ -324,13 +430,44 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
         setPendingCount(remaining);
         if (error) {
           setSyncMode('offline'); // sem internet OU tabela ainda nao criada
+          if (isReconnect) {
+            mapPerformanceMonitor.completeReconnectCycle(poisRef.current.length);
+            poiReconnectProfiler.finishCycle({
+              poiCount: poisRef.current.length,
+              error,
+            });
+          }
         } else {
           // mergeRemoteWithPending aplica as operações pendentes (inclusive
           // exclusões) por cima do estado remoto, então um item excluído que
           // ainda não subiu nunca "volta". O filterTombstoned protege contra
           // atraso de replicação (o banco ainda devolver um item já excluído).
-          setPoisState(reconcileRemoteSnapshot(remote));
+          if (isReconnect) {
+            mapPerformanceMonitor.startPhase('reconnect-poi-reconcile');
+            poiReconnectProfiler.markStageStart('reconcile');
+          }
+          const reconciled = reconcileRemoteSnapshot(remote);
+          if (isReconnect) {
+            const reconcileMeta = {
+              remoteCount: remote.length,
+              reconciledCount: reconciled.length,
+            };
+            mapPerformanceMonitor.endPhase('reconnect-poi-reconcile', reconcileMeta);
+            poiReconnectProfiler.markStageEnd('reconcile', reconcileMeta);
+            mapPerformanceMonitor.startPhase('reconnect-poi-render');
+            poiReconnectProfiler.markStageStart('markers-paint');
+          }
+
+          setPoisState(reconciled);
           setSyncMode(!flushSucceeded ? 'offline' : remaining > 0 ? 'syncing' : 'online');
+
+          if (isReconnect && typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('bp-pois-reconnect-updated', {
+                detail: { count: reconciled.length },
+              })
+            );
+          }
         }
       } while (resyncQueuedRef.current);
     } finally {
@@ -390,26 +527,54 @@ export function POIManagerProvider({ children }: { children: React.ReactNode }) 
     const onOnline = () => {
       // Ao voltar a internet: reconectamos o canal realtime IMEDIATAMENTE
       // (sem esperar o backoff exponencial) e disparamos um syncNow para
-      // buscar eventuais mudanças perdidas enquanto estávamos offline.
+      // enviar a fila do IndexedDB em lote único e buscar mudanças perdidas offline.
+      const pending = getPendingCount();
+      if (!mapPerformanceMonitor.isReconnectCycleActive() && (mapPerformanceMonitor.hasPendingOfflineReturn() || pending > 0)) {
+        mapPerformanceMonitor.startReconnectCycle(pending);
+        poiReconnectProfiler.startCycle(pending);
+      }
+      if (pending > 0) {
+        console.info(
+          `%c[OfflineSync · Conexão Restaurada]%c Detectado retorno da rede — disparando envio em lote único (batch) de ${pending} ${pending === 1 ? 'item' : 'itens'} do IndexedDB`,
+          'background:#0c4a6e;color:#bae6fd;font-weight:700;padding:2px 6px;border-radius:4px;',
+          'color:inherit;font-weight:600;'
+        );
+      }
       try { realtimeReconnectRef.current?.(); } catch { /* noop */ }
       void syncNow();
     };
-    const onOffline = () => { setSyncMode('offline'); setPendingCount(getPendingCount()); };
+    const onOffline = () => {
+      mapPerformanceMonitor.markWentOffline();
+      setSyncMode('offline');
+      setPendingCount(getPendingCount());
+    };
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         try { realtimeReconnectRef.current?.(); } catch { /* noop */ }
         void syncNow();
       }
     };
+    const onForceSync = (event: Event) => {
+      const detail = (event as CustomEvent<{ ignoreLatencyPause?: boolean }>).detail;
+      void syncNow({ ignoreLatencyPause: Boolean(detail?.ignoreLatencyPause) });
+    };
+    const unsubNetQuality = networkQualityMonitor.subscribe((quality) => {
+      if (quality.online && !quality.shouldPauseSync && getPendingCount() > 0) {
+        void syncNow();
+      }
+    });
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    window.addEventListener('bp-force-sync-now', onForceSync);
     document.addEventListener('visibilitychange', onVisible);
     const interval = setInterval(() => {
       if (typeof navigator === 'undefined' || navigator.onLine !== false) void syncNow();
     }, 30_000);
     return () => {
+      unsubNetQuality();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      window.removeEventListener('bp-force-sync-now', onForceSync);
       document.removeEventListener('visibilitychange', onVisible);
       clearInterval(interval);
     };
@@ -652,7 +817,7 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
   const [showCoordSearch, setShowCoordSearch] = useState(false);
   const [coordInput, setCoordInput] = useState('');
   const [coordError, setCoordError] = useState('');
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
   const [modalMounted, setModalMounted] = useState(showModal);
   const [searchFilter, setSearchFilter] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
@@ -1113,69 +1278,91 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
         </div>
       )}
 
-      {/* ── Lista de POIs (painel lateral) ── */}
-      <div className="glass-liquid-strong bp-poi-live-card" style={{
-        position: 'absolute', bottom: 80, left: 16, zIndex: 10,
-        display: hidden ? 'none' : undefined,
-        background: 'var(--bp-live-panel-bg)',
-        backdropFilter: 'blur(32px) saturate(185%)',
-        WebkitBackdropFilter: 'blur(32px) saturate(185%)',
-        border: '1px solid var(--bp-glass-border-accent)', borderRadius: 18,
-        overflow: 'hidden', boxShadow: 'var(--bp-glass-shadow)',
-        color: 'var(--bp-panel-text)',
-        fontFamily: 'var(--bp-font-ui)',
-        width: 240, transition: 'all 0.3s',
-      }}>
-        {/* Header */}
+      {/* ── Painel de Marcações acoplado na lateral esquerda (abre/oculta pela setinha lateral) ── */}
+      <div
+        data-testid="poi-side-drawer"
+        data-open={isSidePanelOpen ? 'true' : 'false'}
+        style={{
+          position: 'absolute',
+          bottom: 80,
+          left: 0,
+          zIndex: 10,
+          display: hidden ? 'none' : 'flex',
+          alignItems: 'center',
+          transform: isSidePanelOpen ? 'translateX(0)' : 'translateX(-244px)',
+          transition: 'transform 0.32s cubic-bezier(0.22, 1, 0.36, 1)',
+          willChange: 'transform',
+          pointerEvents: 'none',
+          fontFamily: 'var(--bp-font-ui)',
+        }}
+      >
         <div
-          className="bp-poi-live-header"
-          onClick={() => setIsMinimized(!isMinimized)}
+          className="glass-liquid-strong bp-poi-live-card"
+          aria-hidden={!isSidePanelOpen}
           style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 12px', cursor: 'pointer',
-            borderBottom: isMinimized ? 'none' : '1px solid var(--bp-glass-border)',
+            width: 244,
+            background: 'var(--bp-live-panel-bg)',
+            backdropFilter: 'blur(32px) saturate(185%)',
+            WebkitBackdropFilter: 'blur(32px) saturate(185%)',
+            border: '1px solid var(--bp-glass-border-accent)',
+            borderLeft: 'none',
+            borderRadius: '0 18px 18px 0',
+            overflow: 'hidden',
+            boxShadow: isSidePanelOpen ? 'var(--bp-glass-shadow)' : 'none',
+            color: 'var(--bp-panel-text)',
+            pointerEvents: isSidePanelOpen ? 'auto' : 'none',
+            opacity: isSidePanelOpen ? 1 : 0.96,
+            transition: 'box-shadow 0.25s ease, opacity 0.25s ease',
           }}
         >
-          <div className="bp-poi-live-icon glass-liquid-button" style={{
-            width: 28, height: 28, borderRadius: 8,
-            background: 'rgba(173,255,47,0.12)', border: '1px solid rgba(173,255,47,0.25)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <MapPin size={14} color="#ADFF2F" />
-          </div>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--bp-heading)', flex: 1 }}>
-            Marcações
-          </span>
-          <span
-            className="bp-poi-sync-status"
-            onClick={(e) => { e.stopPropagation(); forceSync?.(); }}
-            title={
-              syncMode === 'online' ? 'Sincronizando em tempo real — clique para atualizar'
-              : syncMode === 'syncing' ? `Sincronizando${pendingCount ? ` (${pendingCount} pendente${pendingCount > 1 ? 's' : ''})` : ''}...`
-              : `Offline — salvo neste aparelho${pendingCount ? ` (${pendingCount} aguardando envio)` : ''}. Clique para tentar sincronizar`
-            }
+          {/* Header */}
+          <div
+            className="bp-poi-live-header"
             style={{
-              display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer',
-              fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 20,
-              background: syncMode === 'online' ? 'rgba(74,222,128,0.15)' : syncMode === 'syncing' ? 'rgba(96,165,250,0.15)' : 'rgba(251,146,60,0.15)',
-              color: syncMode === 'online' ? '#4ade80' : syncMode === 'syncing' ? '#60a5fa' : '#fb923c',
-              border: `1px solid ${syncMode === 'online' ? 'rgba(74,222,128,0.3)' : syncMode === 'syncing' ? 'rgba(96,165,250,0.3)' : 'rgba(251,146,60,0.3)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 12px',
+              borderBottom: '1px solid var(--bp-glass-border)',
+            }}
+          >
+            <div className="bp-poi-live-icon glass-liquid-button" style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: 'rgba(173,255,47,0.12)', border: '1px solid rgba(173,255,47,0.25)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
             }}>
-            {syncMode === 'online' ? <Wifi size={9} /> : syncMode === 'syncing' ? <Loader2 size={9} className="bp-spin" /> : <WifiOff size={9} />}
-            {syncMode === 'online' ? 'AO VIVO' : syncMode === 'syncing' ? 'SINC...' : 'OFFLINE'}
-            {pendingCount > 0 && syncMode !== 'online' ? ` ${pendingCount}` : ''}
-          </span>
-          <span style={{
-            fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 20,
-            background: 'rgba(173,255,47,0.15)', color: '#ADFF2F',
-            border: '1px solid rgba(173,255,47,0.3)',
-          }} className="bp-poi-count-badge glass-liquid-button" data-testid="poi-count">{pois.length}</span>
-          {isMinimized
-            ? <ChevronUp size={14} color="var(--bp-control-muted)" />
-            : <ChevronDown size={14} color="var(--bp-control-muted)" />}
-        </div>
+              <MapPin size={14} color="#ADFF2F" />
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--bp-heading)', flex: 1 }}>
+              Marcações
+            </span>
+            <span
+              className="bp-poi-sync-status"
+              onClick={(e) => { e.stopPropagation(); forceSync?.(); }}
+              title={
+                syncMode === 'online' ? 'Sincronizando em tempo real — clique para atualizar'
+                : syncMode === 'syncing' ? `Sincronizando${pendingCount ? ` (${pendingCount} pendente${pendingCount > 1 ? 's' : ''})` : ''}...`
+                : `Offline — salvo neste aparelho${pendingCount ? ` (${pendingCount} aguardando envio)` : ''}. Clique para tentar sincronizar`
+              }
+              style={{
+                display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer',
+                fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 20,
+                background: syncMode === 'online' ? 'rgba(74,222,128,0.15)' : syncMode === 'syncing' ? 'rgba(96,165,250,0.15)' : 'rgba(251,146,60,0.15)',
+                color: syncMode === 'online' ? '#4ade80' : syncMode === 'syncing' ? '#60a5fa' : '#fb923c',
+                border: `1px solid ${syncMode === 'online' ? 'rgba(74,222,128,0.3)' : syncMode === 'syncing' ? 'rgba(96,165,250,0.3)' : 'rgba(251,146,60,0.3)'}`,
+              }}>
+              {syncMode === 'online' ? <Wifi size={9} /> : syncMode === 'syncing' ? <Loader2 size={9} className="bp-spin" /> : <WifiOff size={9} />}
+              {syncMode === 'online' ? 'AO VIVO' : syncMode === 'syncing' ? 'SINC...' : 'OFFLINE'}
+              {pendingCount > 0 && syncMode !== 'online' ? ` ${pendingCount}` : ''}
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 20,
+              background: 'rgba(173,255,47,0.15)', color: '#ADFF2F',
+              border: '1px solid rgba(173,255,47,0.3)',
+            }} className="bp-poi-count-badge glass-liquid-button" data-testid="poi-count">{pois.length}</span>
+          </div>
 
-        {!isMinimized && (
           <div style={{ padding: '8px 10px 10px' }}>
             {/* Busca */}
             {SHOW_POI_LIST && pois.length > 3 && (
@@ -1190,6 +1377,7 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
                   placeholder="Filtrar..."
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
+                  tabIndex={isSidePanelOpen ? 0 : -1}
                   style={{
                     flex: 1, background: 'transparent', border: 'none', outline: 'none',
                     color: 'rgba(255,255,255,0.7)', fontSize: 12,
@@ -1230,6 +1418,8 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
                           <Camera size={12} color="rgba(96,165,250,0.8)" style={{ flexShrink: 0 }} />
                         )}
                         <button
+                          type="button"
+                          tabIndex={isSidePanelOpen ? 0 : -1}
                           onClick={() => deletePOI(poi.id)}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}
                         >
@@ -1250,6 +1440,7 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
             {notificationPermission !== 'granted' ? (
               <button
                 type="button"
+                tabIndex={isSidePanelOpen ? 0 : -1}
                 data-testid="enable-critical-notifications"
                 onClick={(event) => { event.stopPropagation(); void handleEnableNotifications(); }}
                 disabled={notificationBusy}
@@ -1258,7 +1449,7 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                   background: notificationPermission === 'denied' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
                   border: `1px solid ${notificationPermission === 'denied' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)'}`,
-                  color: notificationPermission === 'denied' ? '#b91c1c' : '#a16207',
+                  color: notificationPermission === 'denied' ? '#f87171' : '#fbbf24',
                   fontWeight: 800, fontSize: 11, cursor: notificationBusy ? 'wait' : 'pointer',
                 }}
               >
@@ -1286,6 +1477,8 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
 
             {/* Botão busca por coords */}
             <button
+              type="button"
+              tabIndex={isSidePanelOpen ? 0 : -1}
               onClick={() => setShowCoordSearch(true)}
               style={{
                 width: '100%', marginTop: 8, padding: '7px 0',
@@ -1298,7 +1491,59 @@ export default function POIManager({ onLocateCoordinates, hidden = false }: POIM
               Buscar por Coordenadas
             </button>
           </div>
-        )}
+        </div>
+
+        {/* Setinha lateral fixa na borda esquerda para abrir/ocultar o painel de Marcações */}
+        <button
+          type="button"
+          data-testid="poi-panel-edge-toggle"
+          aria-expanded={isSidePanelOpen}
+          aria-label={isSidePanelOpen ? 'Ocultar painel de marcações' : 'Abrir painel de marcações'}
+          title={isSidePanelOpen ? 'Ocultar marcações na lateral' : 'Abrir painel de marcações'}
+          onClick={() => setIsSidePanelOpen((open) => !open)}
+          className="glass-liquid-strong bp-poi-edge-handle"
+          style={{
+            pointerEvents: 'auto',
+            width: 32,
+            height: 60,
+            marginLeft: -1,
+            borderRadius: '0 14px 14px 0',
+            background: 'var(--bp-live-panel-bg)',
+            backdropFilter: 'blur(28px) saturate(185%)',
+            WebkitBackdropFilter: 'blur(28px) saturate(185%)',
+            border: '1px solid var(--bp-glass-border-accent)',
+            borderLeft: 'none',
+            boxShadow: '6px 8px 24px rgba(0, 0, 0, 0.35)',
+            color: '#ADFF2F',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'background 0.2s ease, color 0.2s ease',
+          }}
+        >
+          {isSidePanelOpen ? (
+            <ChevronLeft size={18} strokeWidth={2.5} />
+          ) : (
+            <>
+              <ChevronRight size={18} strokeWidth={2.5} />
+              <span
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: 'rgba(255,255,255,0.75)',
+                }}
+              >
+                {pois.length}
+              </span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* ── Modal de Adição de POI ── */}
